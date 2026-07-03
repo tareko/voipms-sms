@@ -29,3 +29,10 @@ Open http://localhost:8317 in Firefox. For instant delivery + auto-start, see
 - `deploy/`  systemd user unit, Cloudflare Tunnel example
 
 See `TODO.md` for the build roadmap.
+
+## License
+
+Copyright (C) 2026 Tarek Loubani. This program is free software: you can
+redistribute it and/or modify it under the terms of the **GNU Affero General
+Public License v3.0** as published by the Free Software Foundation. See
+[LICENSE](./LICENSE) for the full text.
