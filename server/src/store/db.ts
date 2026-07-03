@@ -188,6 +188,12 @@ export function reactionExists(id: string): boolean {
   return Boolean(getDb().prepare('SELECT 1 FROM reaction_events WHERE id = ?').get(id));
 }
 
+export function getReactionEvent(id: string): { target_id: string | null } | undefined {
+  return getDb().prepare('SELECT target_id FROM reaction_events WHERE id = ?').get(id) as
+    | { target_id: string | null }
+    | undefined;
+}
+
 export function addReaction(ev: {
   id: string;
   targetId: string | null;

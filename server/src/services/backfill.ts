@@ -1,4 +1,4 @@
-import { getDb, getThread, reactionExists, addReaction, deleteMessage } from '../store/db.js';
+import { getDb, getThread, getReactionEvent, addReaction, deleteMessage } from '../store/db.js';
 import { detectReaction, matchTarget } from '../reactions.js';
 
 export interface BackfillResult {
@@ -10,10 +10,10 @@ export interface BackfillResult {
 }
 
 /**
- * One-time cleanup: scan all stored messages for iMessage-style reaction texts,
- * convert them into reaction_events attached to their matched target, and delete
- * the now-redundant "Liked …" text bubbles. Idempotent (reaction_events dedup
- * by message id). Unmatched reactions are left as text.
+ * Scan all stored messages for iMessage-style reaction texts, convert them into
+ * reaction_events attached to their matched target, and delete the now-redundant
+ * "Liked …" text bubbles. Self-healing and idempotent: a previously-unmatched
+ * reaction whose text is still present is re-attempted on each run.
  */
 export function backfillReactions(): BackfillResult {
   const threads = getDb()
@@ -28,22 +28,36 @@ export function backfillReactions(): BackfillResult {
     for (const m of msgs) {
       result.scanned++;
       const d = detectReaction(m.message);
-      if (!d || reactionExists(m.id)) continue;
-      result.reactions++;
+      if (!d) continue;
+      const existing = getReactionEvent(m.id);
       const target = matchTarget(candidates, d.quoted);
-      addReaction({
-        id: m.id,
-        targetId: target?.id ?? null,
-        did,
-        contact,
-        emoji: d.emoji,
-        fromTel: m.type === 1 ? contact : 'me',
-        ts: m.ts,
-      });
       if (target) {
-        result.matched++;
+        if (!existing) result.reactions++;
+        if (!existing || existing.target_id !== target.id) {
+          addReaction({
+            id: m.id,
+            targetId: target.id,
+            did,
+            contact,
+            emoji: d.emoji,
+            fromTel: m.type === 1 ? contact : 'me',
+            ts: m.ts,
+          });
+        }
         deleteMessage(m.id);
         result.removed++;
+        result.matched++;
+      } else if (!existing) {
+        addReaction({
+          id: m.id,
+          targetId: null,
+          did,
+          contact,
+          emoji: d.emoji,
+          fromTel: m.type === 1 ? contact : 'me',
+          ts: m.ts,
+        });
+        result.reactions++;
       }
     }
   }
@@ -52,3 +66,4 @@ export function backfillReactions(): BackfillResult {
   );
   return result;
 }
+

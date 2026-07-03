@@ -31,27 +31,75 @@ const VERBS = Object.keys(VERB_TO_EMOJI)
   .sort((a, b) => b.length - a.length)
   .join('|');
 
+// Quote characters we strip around the quoted message: « » " " ' ' ' "
+const QUOTES = '\u00ab\u00bb\u201c\u201d\u2018\u2019\u0027\u0022';
+
 // "Liked «msg»", "Loved "msg"", "Laughed at msg", with optional quotes/«»/-.
-const RE = new RegExp(`^(?:(${VERBS}))\\s*(?:[«""''\\-]\\s*)?([\\s\\S]+?)(?:\\s*[»""''])?$`, 'i');
+const RE = new RegExp(
+  `^(?:(${VERBS}))\\s*[${QUOTES}\\-]?\\s*([\\s\\S]+?)[${QUOTES}]?$`,
+  'i'
+);
+
+// Inline-emoji "iOS 16+" fallback: e.g. `ah "❤️ to "your message`.
+// Strip typographic hair/zero-width spaces first, then look for an emoji near
+// the start followed by " to " and a quoted snippet.
+const ZW = /[\u200a\u200b\ufeff]/g;
+const RE_TO = new RegExp(`^\\s{0,3}\\bto\\b\\s*[${QUOTES}]?\\s*([\\s\\S]+?)\\s*[${QUOTES}]?$`, 'i');
+
+const REACTION_EMOJI_VARIANTS: { match: string; canon: string }[] = [
+  { match: '❤️', canon: '❤️' },
+  { match: '❤', canon: '❤️' },
+  { match: '👍', canon: '👍' },
+  { match: '👎', canon: '👎' },
+  { match: '😂', canon: '😂' },
+  { match: '😆', canon: '😂' },
+  { match: '‼️', canon: '‼️' },
+  { match: '‼', canon: '‼️' },
+  { match: '❗', canon: '‼️' },
+  { match: '❓', canon: '❓' },
+];
+
+function stripQuotes(s: string): string {
+  const set = new Set([...QUOTES]);
+  let t = s;
+  while (t.length && set.has(t[0])) t = t.slice(1);
+  while (t.length && set.has(t[t.length - 1])) t = t.slice(0, -1);
+  return t.trim();
+}
 
 export interface DetectedReaction {
   emoji: string;
   quoted: string; // the message text that was reacted to
 }
 
-/** Detect an iMessage-style reaction fallback message. */
+/** Detect an iMessage-style reaction fallback message (verb form or inline-emoji form). */
 export function detectReaction(text: string): DetectedReaction | null {
   if (!text) return null;
-  const t = text.trim();
+  const t = text.replace(ZW, '').trim();
   if (t.length > 200) return null; // reactions are short; avoid false positives on long bodies
+
+  // Form 1: "Loved «msg»" / "Liked "msg"" / "Laughed at msg"
   const m = t.match(RE);
-  if (!m) return null;
-  const verb = m[1].toLowerCase();
-  const emoji = VERB_TO_EMOJI[verb];
-  if (!emoji) return null;
-  const quoted = (m[2] ?? '').trim();
-  if (quoted.length < 1) return null;
-  return { emoji, quoted };
+  if (m) {
+    const verb = m[1].toLowerCase();
+    const emoji = VERB_TO_EMOJI[verb];
+    const quoted = stripQuotes(m[2] ?? '');
+    if (emoji && quoted.length >= 1) return { emoji, quoted };
+  }
+
+  // Form 2: inline emoji + " to " + quoted message (iOS 16+ heart-style)
+  for (const v of REACTION_EMOJI_VARIANTS) {
+    const idx = t.indexOf(v.match);
+    if (idx >= 0 && idx <= 12) {
+      const rest = t.slice(idx + v.match.length);
+      const m2 = rest.match(RE_TO);
+      if (m2) {
+        const quoted = stripQuotes(m2[1] ?? '');
+        if (quoted.length >= 2) return { emoji: v.canon, quoted };
+      }
+    }
+  }
+  return null;
 }
 
 /** Build the fallback text to send a reaction to a given message body. */
@@ -65,7 +113,12 @@ export function buildReactionText(emoji: string, targetText: string): string | n
 }
 
 function norm(s: string): string {
-  return s.replace(/\s+/g, ' ').trim().toLowerCase();
+  return s
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 /**

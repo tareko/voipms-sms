@@ -25,6 +25,8 @@ export function Thread() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  const contactNum = formatDid(selectedContact);
+
   if (!selectedContact) {
     return (
       <div className="thread empty">
@@ -41,8 +43,10 @@ export function Thread() {
       <div className="thread-header">
         <Avatar name={name || selectedContact} size={36} />
         <div className="thread-header-name">
-          <div className="thread-name">{name || selectedContact}</div>
-          <div className="thread-sub">{formatDid(selectedDid)}</div>
+          <div className="thread-name">{name || contactNum}</div>
+          <div className="thread-sub">
+            {name ? `${contactNum} · ` : ''}via {formatDid(selectedDid)}
+          </div>
         </div>
       </div>
 
@@ -80,27 +84,27 @@ function Bubble({
     <div
       className={`bubble-row ${incoming ? 'in' : 'out'}`}
       onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => {
-        setHover(false);
-        setPicker(false);
-      }}
+      onMouseLeave={() => setHover(false)}
     >
       {picker && (
-        <div className={`react-bar ${incoming ? 'in' : 'out'}`}>
-          {REACT_EMOJIS.map((e) => (
-            <button
-              key={e}
-              className="react-bar-emoji"
-              title={e}
-              onClick={() => {
-                onReact(e);
-                setPicker(false);
-              }}
-            >
-              {e}
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="react-backdrop" onClick={() => setPicker(false)} />
+          <div className={`react-bar ${incoming ? 'in' : 'out'}`}>
+            {REACT_EMOJIS.map((e) => (
+              <button
+                key={e}
+                className="react-bar-emoji"
+                title={e}
+                onClick={() => {
+                  onReact(e);
+                  setPicker(false);
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       <div className={`bubble-wrap ${incoming ? 'in' : 'out'}`}>
