@@ -10,6 +10,20 @@ const parser = new XMLParser({
   isArray: (tagName) => tagName === 'response',
 });
 
+const LINE_SPLIT = /\r\n|\r|\n/;
+
+/** Decode XML entities (fast-xml-parser leaves numeric refs like &#13; intact). */
+function unescapeXml(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
 function authHeader(): string {
   return 'Basic ' + Buffer.from(`${config.nextcloud.username}:${config.nextcloud.password}`).toString('base64');
 }
@@ -25,8 +39,31 @@ async function dav(path: string, init: RequestInit = {}): Promise<Response> {
   });
 }
 
+function toArrayResponses(xml: unknown): Record<string, unknown>[] {
+  const r = (xml as { multistatus?: { response?: unknown } })?.multistatus?.response;
+  if (!r) return [];
+  return Array.isArray(r) ? (r as Record<string, unknown>[]) : [r as Record<string, unknown>];
+}
+
+function addressBookMatches(href: string, displayname: string | undefined): boolean {
+  const filter = config.nextcloud.addressbook;
+  const hay = `${href} ${config.nextcloud.url}${href} ${displayname ?? ''}`.toLowerCase();
+  if (!filter) {
+    // By default skip Nextcloud's auto-generated system address book (org directory).
+    return !href.includes('system');
+  }
+  return filter
+    .split(',')
+    .some((sub) => {
+      const s = sub.trim().toLowerCase();
+      return s && hay.includes(s);
+    });
+}
+
 async function discoverAddressBooks(): Promise<string[]> {
-  if (config.nextcloud.addressbook) return [config.nextcloud.addressbook];
+  if (config.nextcloud.addressbook && config.nextcloud.addressbook.startsWith('/')) {
+    return [config.nextcloud.addressbook];
+  }
 
   const user = encodeURIComponent(config.nextcloud.username);
   const basePath = `/remote.php/dav/addressbooks/users/${user}/`;
@@ -40,19 +77,17 @@ async function discoverAddressBooks(): Promise<string[]> {
   });
   if (!res.ok) throw new Error(`CardDAV discovery failed: HTTP ${res.status}`);
   const xml = parser.parse(await res.text());
-  const responses: unknown[] = xml.multistatus?.response ?? [];
   const books: string[] = [];
-  for (const entry of responses) {
-    const e = entry as Record<string, unknown>;
-    const propstat = e.propstat as Record<string, unknown> | undefined;
+  for (const entry of toArrayResponses(xml)) {
+    const propstat = entry.propstat as Record<string, unknown> | undefined;
     const prop = (propstat?.prop ?? {}) as Record<string, unknown>;
     const rt = prop.resourcetype as Record<string, unknown> | undefined;
     if (rt && 'addressbook' in rt) {
-      const href = e.href as string | undefined;
-      if (href) books.push(href.endsWith('/') ? href : href);
+      const href = entry.href as string | undefined;
+      const displayname = prop.displayname as string | undefined;
+      if (href && addressBookMatches(href, displayname)) books.push(href);
     }
   }
-  if (books.length === 0) books.push(basePath);
   return books;
 }
 
@@ -60,29 +95,35 @@ async function fetchVCards(addressBookHref: string): Promise<string[]> {
   const res = await dav(addressBookHref, {
     method: 'REPORT',
     headers: { Depth: '1', 'Content-Type': 'application/xml; charset=utf-8' },
+    // Request only FN and TEL — avoids pulling base64 photos, cutting payloads
+    // from tens of MB down to ~1 MB for thousands of contacts (RFC 6352 §10.5).
     body: `<?xml version="1.0"?>
       <c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
-        <d:prop><d:getetag/><c:address-data/></d:prop>
+        <d:prop>
+          <c:address-data>
+            <c:prop name="VERSION"/>
+            <c:prop name="FN"/>
+            <c:prop name="TEL"/>
+          </c:address-data>
+        </d:prop>
       </c:addressbook-query>`,
   });
   if (!res.ok) throw new Error(`CardDAV query failed: HTTP ${res.status} for ${addressBookHref}`);
   const xml = parser.parse(await res.text());
-  const responses: unknown[] = xml.multistatus?.response ?? [];
   const cards: string[] = [];
-  for (const entry of responses) {
-    const e = entry as Record<string, unknown>;
-    const propstat = e.propstat as Record<string, unknown> | undefined;
+  for (const entry of toArrayResponses(xml)) {
+    const propstat = entry.propstat as Record<string, unknown> | undefined;
     const prop = (propstat?.prop ?? {}) as Record<string, unknown>;
     const data = prop['address-data'];
-    if (typeof data === 'string') cards.push(data);
-    else if (Array.isArray(data)) for (const d of data) if (typeof d === 'string') cards.push(d);
+    if (typeof data === 'string') cards.push(unescapeXml(data));
+    else if (Array.isArray(data)) for (const d of data) if (typeof d === 'string') cards.push(unescapeXml(d));
   }
   return cards;
 }
 
-/** Unfold RFC 6350 line continuations (lines starting with space/tab). */
+/** Unfold RFC 6350 line continuations (a folded line starts with space/tab). */
 function unfoldVcard(text: string): string {
-  return text.replace(/\r?\n[ \t]/g, '');
+  return text.replace(/(?:\r\n|\r|\n)[ \t]/g, '');
 }
 
 export interface ParsedVCard {
@@ -91,29 +132,20 @@ export interface ParsedVCard {
 }
 
 export function parseVCard(text: string): ParsedVCard | null {
-  const block = text.includes('BEGIN:VCARD') ? text : text;
-  if (!/BEGIN:VCARD/i.test(block)) return null;
-  const lines = unfoldVcard(block).split(/\r?\n/);
+  if (!/BEGIN:VCARD/i.test(text)) return null;
+  const lines = unfoldVcard(text).split(LINE_SPLIT);
   let fn: string | null = null;
   const tels: string[] = [];
   for (const line of lines) {
     if (/^FN:/i.test(line)) {
-      fn = decodeVcardValue(line.slice(3));
+      if (fn === null) fn = line.slice(3).trim();
     } else if (/^TEL/i.test(line)) {
-      const value = line.slice(line.indexOf(':') + 1);
-      if (value) tels.push(decodeVcardValue(value));
+      const value = line.slice(line.indexOf(':') + 1).trim();
+      if (value) tels.push(value);
     }
   }
   if (!fn && tels.length === 0) return null;
   return { fn: fn ?? 'Unknown', tels };
-}
-
-function decodeVcardValue(value: string): string {
-  if (value.includes(':')) {
-    // param;value form already split — value here is post-colon
-  }
-  // Minimal CHARACT escaping not expected for FN/TEL in practice.
-  return value.trim();
 }
 
 let lastStatus = 'idle';
@@ -147,8 +179,10 @@ export async function syncContacts(): Promise<number> {
     console.log(`[carddav] synced ${count} contacts from ${books.length} address book(s)`);
     return count;
   } catch (err) {
-    lastStatus = `error: ${(err as Error).message}`;
-    console.error('[carddav] sync failed:', (err as Error).message);
+    const e = err as Error & { cause?: { code?: string; message?: string } };
+    const detail = e.cause ? ` [${e.cause.code ?? e.cause.message}]` : '';
+    lastStatus = `error: ${e.message}${detail}`;
+    console.error('[carddav] sync failed:', e.message, detail);
     return 0;
   }
 }

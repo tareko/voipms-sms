@@ -113,15 +113,22 @@ export interface GetSmsParams {
 }
 
 export async function getSMS(params: GetSmsParams): Promise<NormalizedSms[]> {
-  const data = await call('getSMS', {
-    did: params.did,
-    from: params.from,
-    to: params.to,
-    type: params.type,
-    contact: params.contact,
-    limit: params.limit,
-    all_messages: 0,
-  });
+  let data: Record<string, unknown>;
+  try {
+    data = await call('getSMS', {
+      did: params.did,
+      from: params.from,
+      to: params.to,
+      type: params.type,
+      contact: params.contact,
+      limit: params.limit,
+      all_messages: 0,
+    });
+  } catch (e) {
+    // 'no_sms' just means no messages matched the filter — not an error.
+    if (e instanceof VoipMsError && e.code === 'no_sms') return [];
+    throw e;
+  }
   const rows = (data.sms as SmsRow[] | undefined) ?? [];
   return rows.map(normalize);
 }

@@ -171,8 +171,10 @@ export function getConversations(did: string): Conversation[] {
 }
 
 // ---------- contacts ----------
+/** Replace the entire contact set atomically (CardDAV sync is a full refresh). */
 export function upsertContacts(contacts: Contact[]): number {
   const tx = getDb().transaction((items: Contact[]) => {
+    getDb().prepare(`DELETE FROM contacts`).run();
     const stmt = getDb().prepare(
       `INSERT INTO contacts(tel, name, raw_tel) VALUES(?, ?, ?)
        ON CONFLICT(tel) DO UPDATE SET name = excluded.name, raw_tel = excluded.raw_tel`
