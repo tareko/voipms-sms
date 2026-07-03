@@ -80,7 +80,7 @@ function normalize(row: SmsRow): NormalizedSms {
     id: String(row.id),
     date: row.date,
     ts: parseVoipDate(row.date),
-    type: row.type === '1' ? 1 : 0,
+    type: String(row.type) === '1' ? 1 : 0,
     did: row.did,
     contact: row.contact,
     contactRaw: row.contact,
@@ -93,7 +93,7 @@ export async function getDIDsInfo(): Promise<Did[]> {
   const data = await call('getDIDsInfo');
   const dids = (data.dids as Array<Record<string, string>> | undefined) ?? [];
   const all = dids
-    .filter((d) => d.sms_available === '1')
+    .filter((d) => String(d.sms_available) === '1')
     .map((d) => ({ did: d.did, description: d.description ?? '' }));
 
   if (config.voipms.dids.length > 0) {

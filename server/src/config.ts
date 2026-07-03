@@ -1,5 +1,15 @@
-import 'dotenv/config';
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import * as dotenv from 'dotenv';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+/** Project root (server/src -> server -> <root>), so paths are cwd-independent. */
+export const projectRoot = resolve(__dirname, '..', '..');
+
+// Load .env from the project root (where .env.example lives). Falls back to cwd.
+const rootEnv = resolve(projectRoot, '.env');
+dotenv.config({ path: existsSync(rootEnv) ? rootEnv : resolve(process.cwd(), '.env') });
 
 function warn(name: string) {
   console.warn(`[config] ${name} is not set — that feature will be disabled until it is.`);
@@ -7,8 +17,8 @@ function warn(name: string) {
 
 export const config = {
   port: Number(process.env.PORT || 8317),
-  webDir: resolve(process.cwd(), process.env.WEB_DIR || '../web/dist'),
-  dbPath: resolve(process.cwd(), process.env.DB_PATH || './data/app.db'),
+  webDir: resolve(projectRoot, process.env.WEB_DIR || 'web/dist'),
+  dbPath: resolve(projectRoot, process.env.DB_PATH || 'data/app.db'),
   voipms: {
     username: process.env.VOIPMS_API_USERNAME || '',
     password: process.env.VOIPMS_API_PASSWORD || '',
