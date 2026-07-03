@@ -1,5 +1,10 @@
 export type Direction = 0 | 1; // 0 = sent, 1 = received
 
+export interface MediaRef {
+  url: string;
+  contentType: string;
+}
+
 export interface Message {
   id: string;
   date: string;
@@ -11,6 +16,7 @@ export interface Message {
   message: string;
   carrierStatus: string;
   read: number;
+  media?: MediaRef[];
 }
 
 export interface Conversation {

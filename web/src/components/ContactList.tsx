@@ -73,7 +73,7 @@ export function ContactList() {
               <ContactRow
                 key={c.contact}
                 name={c.name ?? c.contactRaw}
-                subtitle={c.lastMessage.message}
+                subtitle={previewText(c.lastMessage)}
                 ts={c.lastMessage.ts}
                 unread={c.unread}
                 active={selectedContact === c.contact}
@@ -92,6 +92,12 @@ export function ContactList() {
       </div>
     </div>
   );
+}
+
+function previewText(m: { message: string; media?: { contentType: string }[] }): string {
+  if (m.message) return m.message;
+  if (m.media && m.media.length) return '📷 Photo';
+  return '';
 }
 
 function ContactRow({

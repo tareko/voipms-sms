@@ -45,6 +45,12 @@ export function initDb() {
       value TEXT
     );
   `);
+
+  // Additive migration: add `media` column for MMS attachments (existing DBs).
+  const cols = db.prepare('PRAGMA table_info(messages)').all() as { name: string }[];
+  if (!cols.some((c) => c.name === 'media')) {
+    db.exec('ALTER TABLE messages ADD COLUMN media TEXT');
+  }
   return db;
 }
 
@@ -67,6 +73,17 @@ export function setKv(key: string, value: string): void {
 }
 
 // ---------- messages ----------
+function parseMedia(raw: unknown): import('../types.js').MediaRef[] | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined;
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length) return arr as import('../types.js').MediaRef[];
+  } catch {
+    /* malformed */
+  }
+  return undefined;
+}
+
 function rowToMessage(r: Record<string, unknown>): Message {
   return {
     id: String(r.id),
@@ -79,15 +96,21 @@ function rowToMessage(r: Record<string, unknown>): Message {
     message: String(r.message),
     carrierStatus: r.carrier_status ? String(r.carrier_status) : '',
     read: Number(r.read),
+    media: parseMedia(r.media),
   };
+}
+
+export function messageExists(id: string): boolean {
+  const row = getDb().prepare('SELECT 1 FROM messages WHERE id = ?').get(id);
+  return Boolean(row);
 }
 
 /** Insert a message; returns true if it was new. */
 export function insertMessage(msg: Message, source: 'poll' | 'webhook' | 'send' = 'poll'): boolean {
   const res = getDb()
     .prepare(
-      `INSERT INTO messages(id, date, ts, type, did, contact, contact_raw, message, carrier_status, read, source)
-       VALUES(@id, @date, @ts, @type, @did, @contact, @contact_raw, @message, @carrier_status, @read, @source)
+      `INSERT INTO messages(id, date, ts, type, did, contact, contact_raw, message, carrier_status, read, source, media)
+       VALUES(@id, @date, @ts, @type, @did, @contact, @contact_raw, @message, @carrier_status, @read, @source, @media)
        ON CONFLICT(id) DO NOTHING`
     )
     .run({
@@ -102,6 +125,7 @@ export function insertMessage(msg: Message, source: 'poll' | 'webhook' | 'send' 
       carrier_status: msg.carrierStatus ?? '',
       read: msg.read ?? 0,
       source,
+      media: msg.media ? JSON.stringify(msg.media) : null,
     });
   return res.changes > 0;
 }

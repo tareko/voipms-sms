@@ -25,6 +25,17 @@ export const api = {
   messages: (did: string, contact: string) =>
     getJson<Message[]>(`/messages?did=${encodeURIComponent(did)}&contact=${encodeURIComponent(contact)}`),
   send: (did: string, contact: string, message: string) => postJson('/send', { did, contact, message }),
+  sendMedia: (did: string, contact: string, message: string, file: Blob, contentType: string) => {
+    const fd = new FormData();
+    fd.append('did', did);
+    fd.append('contact', contact);
+    fd.append('message', message);
+    fd.append('media', file, contentType.startsWith('image/') ? 'photo' : 'attachment');
+    return fetch(base + '/send-media', { method: 'POST', body: fd }).then(async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      return (await r.json()) as { ok: boolean; id: string };
+    });
+  },
   markRead: (did: string, contact: string) => postJson('/markread', { did, contact }),
   contacts: (q: string) => getJson<Contact[]>(`/contacts?q=${encodeURIComponent(q)}`),
   refreshContacts: () => postJson('/contacts/refresh', {}),

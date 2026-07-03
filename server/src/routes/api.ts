@@ -1,15 +1,24 @@
 import { Router } from 'express';
+import multer from 'multer';
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { config } from '../config.js';
 import { getConversations, getThread, markThreadRead, searchContacts } from '../store/db.js';
-import { sendSMS, setSmsCallback } from '../voipms/client.js';
+import { sendSMS, sendMMS, setSmsCallback } from '../voipms/client.js';
 import { runPollOnce, getPollerStatus, getActiveDids } from '../voipms/poller.js';
 import { syncContacts, getCarddavStatus } from '../contacts/carddav.js';
 import { broadcast } from '../realtime/sse.js';
 import { ingest } from '../services/ingest.js';
+import { saveUploadedMedia, getMediaPath, mediaContentType } from '../services/media.js';
 import type { NormalizedSms } from '../voipms/client.js';
 import { normalizeTel } from '../contacts/match.js';
 
 export const api = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 }, // headroom; client resizes before upload
+});
 
 function nowVoipDate(): string {
   const d = new Date();
@@ -63,7 +72,11 @@ api.post('/send', async (req, res) => {
 
     const didNorm = normalizeTel(did) ?? did;
     const contactNorm = normalizeTel(contact) ?? contact;
-    const id = await sendSMS(toVoipNumber(didNorm), toVoipNumber(contactNorm), message);
+    const tooLong = message.length > 160;
+
+    const id = tooLong
+      ? await sendMMS(toVoipNumber(didNorm), toVoipNumber(contactNorm), message, [])
+      : await sendSMS(toVoipNumber(didNorm), toVoipNumber(contactNorm), message);
 
     const sms: NormalizedSms = {
       id: id || `local-${Date.now()}`,
@@ -76,12 +89,69 @@ api.post('/send', async (req, res) => {
       message,
       carrierStatus: '',
     };
-    ingest(sms, 'send');
+    await ingest(sms, 'send');
     res.json({ ok: true, id: sms.id });
   } catch (err) {
     console.error('[api] send failed:', (err as Error).message);
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+/** Send an MMS with an image attachment (multipart upload). */
+api.post('/send-media', upload.single('media'), async (req, res) => {
+  try {
+    const did = String(req.body?.did || '');
+    const contact = String(req.body?.contact || '');
+    const message = String(req.body?.message || '');
+    const file = req.file;
+    if (!did || !contact || !file) {
+      return res.status(400).json({ error: 'did, contact, and media file required' });
+    }
+    if (!file.mimetype.startsWith('image/')) {
+      return res.status(400).json({ error: 'only image attachments are supported' });
+    }
+
+    const didNorm = normalizeTel(did) ?? did;
+    const contactNorm = normalizeTel(contact) ?? contact;
+    const contentType = file.mimetype;
+    const data = file.buffer.toString('base64');
+
+    const id = await sendMMS(
+      toVoipNumber(didNorm),
+      toVoipNumber(contactNorm),
+      message,
+      [{ data, contentType }]
+    );
+
+    // Cache the sent image locally so it shows in the thread immediately.
+    const mediaRef = saveUploadedMedia(file.buffer, contentType);
+    const sms: NormalizedSms = {
+      id: id || `local-mms-${Date.now()}`,
+      date: nowVoipDate(),
+      ts: Date.now(),
+      type: 0,
+      did: didNorm,
+      contact: contactNorm,
+      contactRaw: contact,
+      message,
+      carrierStatus: '',
+    };
+    await ingest(sms, 'send', [mediaRef]);
+    res.json({ ok: true, id: sms.id });
+  } catch (err) {
+    console.error('[api] send-media failed:', (err as Error).message);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/** Serve a cached media attachment. */
+api.get('/media/:file', (req, res) => {
+  const file = basename(String(req.params.file));
+  const path = getMediaPath(file);
+  if (!existsSync(path)) return res.status(404).send('not found');
+  res.setHeader('Content-Type', mediaContentType(file));
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.sendFile(path);
 });
 
 api.post('/markread', (req, res) => {

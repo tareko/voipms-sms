@@ -42,14 +42,27 @@ export function Thread() {
 
       <div className="thread-scroll" ref={scrollRef}>
         <div className="thread-day">End-to-end via voip.ms</div>
-        {messages.map((m) => (
-          <div key={m.id} className={`bubble-row ${m.type === 1 ? 'in' : 'out'}`}>
-            <div className="bubble">
-              <span className="bubble-text">{m.message}</span>
-              <span className="bubble-time">{formatTime(m.ts)}</span>
+        {messages.map((m) => {
+          const images = m.media?.filter((x) => x.contentType.startsWith('image/')) ?? [];
+          const caption = m.message;
+          return (
+            <div key={m.id} className={`bubble-row ${m.type === 1 ? 'in' : 'out'}`}>
+              <div className={`bubble${images.length ? ' has-media' : ''}`}>
+                {images.length > 0 && (
+                  <div className="bubble-media">
+                    {images.map((img, i) => (
+                      <a key={i} href={img.url} target="_blank" rel="noreferrer">
+                        <img src={img.url} alt="" loading="lazy" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {caption && <span className="bubble-text">{caption}</span>}
+                <span className="bubble-time">{formatTime(m.ts)}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

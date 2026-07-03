@@ -1,5 +1,10 @@
 export type Direction = 0 | 1; // 0 = sent, 1 = received
 
+export interface MediaRef {
+  url: string; // local serving path, e.g. /api/media/<file>
+  contentType: string;
+}
+
 export interface Message {
   id: string;
   date: string; // 'YYYY-MM-DD HH:MM:SS' (voip.ms format)
@@ -11,6 +16,7 @@ export interface Message {
   message: string;
   carrierStatus: string;
   read: number; // 0/1 (local only)
+  media?: MediaRef[]; // MMS attachments (cached locally)
 }
 
 export interface Conversation {

@@ -20,6 +20,9 @@ interface SmsRow {
   message: string;
   carrier_status?: string;
   media?: string[];
+  col_media1?: string;
+  col_media2?: string;
+  col_media3?: string;
 }
 
 export interface NormalizedSms {
@@ -32,6 +35,12 @@ export interface NormalizedSms {
   contactRaw: string;
   message: string;
   carrierStatus: string;
+  mediaUrls?: string[]; // MMS attachment URLs (voip.ms media.php)
+}
+
+export interface MmsMedia {
+  data: string; // raw base64 (no data: prefix)
+  contentType: string;
 }
 
 async function call(method: string, params: Record<string, string | number | undefined> = {}) {
@@ -76,6 +85,13 @@ export function parseVoipDate(date: string): number {
 }
 
 function normalize(row: SmsRow): NormalizedSms {
+  const mediaUrls: string[] = [];
+  const mediaArr = row.media;
+  if (Array.isArray(mediaArr)) for (const m of mediaArr) if (m) mediaUrls.push(m);
+  for (let i = 1; i <= 3; i++) {
+    const m = row[`col_media${i}` as 'col_media1' | 'col_media2' | 'col_media3'];
+    if (typeof m === 'string' && m && !mediaUrls.includes(m)) mediaUrls.push(m);
+  }
   return {
     id: String(row.id),
     date: row.date,
@@ -86,6 +102,7 @@ function normalize(row: SmsRow): NormalizedSms {
     contactRaw: row.contact,
     message: decodeMessage(row.message ?? ''),
     carrierStatus: row.carrier_status ?? '',
+    mediaUrls: mediaUrls.length ? mediaUrls : undefined,
   };
 }
 
@@ -136,6 +153,65 @@ export async function getSMS(params: GetSmsParams): Promise<NormalizedSms[]> {
 export async function sendSMS(did: string, dst: string, message: string): Promise<string> {
   const data = await call('sendSMS', { did, dst, message });
   return String((data as { sms?: string }).sms ?? '');
+}
+
+export async function getMMS(params: GetSmsParams): Promise<NormalizedSms[]> {
+  let data: Record<string, unknown>;
+  try {
+    data = await call('getMMS', {
+      did: params.did,
+      from: params.from,
+      to: params.to,
+      type: params.type,
+      contact: params.contact,
+      limit: params.limit,
+      all_messages: 0,
+    });
+  } catch (e) {
+    // 'no_sms'/'no_mms' just mean no messages matched — not an error.
+    if (e instanceof VoipMsError && (e.code === 'no_sms' || e.code === 'no_mms')) return [];
+    throw e;
+  }
+  const rows = (data.sms as SmsRow[] | undefined) ?? [];
+  return rows.map(normalize);
+}
+
+/**
+ * Send an MMS via POST multipart/form-data. GET cannot carry an image
+ * (voip.ms' Cloudflare front rejects long URLs), and the endpoint MUST be the
+ * no-www host (www.voip.ms 301-redirects and drops the body -> missing_method).
+ * media1..3 must be `data:<mime>;base64,<...>`. ~1.2 MB per file.
+ */
+export async function sendMMS(
+  did: string,
+  dst: string,
+  message: string,
+  media: MmsMedia[] = []
+): Promise<string> {
+  if (!config.voipms.username || !config.voipms.password) {
+    throw new VoipMsError('missing_credentials');
+  }
+  const form = new FormData();
+  form.set('api_username', config.voipms.username);
+  form.set('api_password', config.voipms.password);
+  form.set('method', 'sendMMS');
+  form.set('did', did);
+  form.set('dst', dst);
+  form.set('message', message);
+  media.slice(0, 3).forEach((m, i) => {
+    form.set(`media${i + 1}`, `data:${m.contentType};base64,${m.data}`);
+  });
+  const res = await fetch(API_BASE, { method: 'POST', body: form });
+  let data: Record<string, unknown>;
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    throw new VoipMsError(`http_${res.status}`);
+  }
+  if (data.status !== 'success') {
+    throw new VoipMsError(String(data.status ?? 'unknown'));
+  }
+  return String((data as { mms?: string }).mms ?? '');
 }
 
 export async function setSmsCallback(

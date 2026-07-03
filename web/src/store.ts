@@ -20,6 +20,7 @@ interface StoreState {
   refreshConversations: () => Promise<void>;
   refreshMessages: () => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
+  sendMedia: (file: Blob, contentType: string, text: string) => Promise<void>;
   markRead: (contact: string) => Promise<void>;
   setStatus: (s: AppStatus) => void;
   patchStatus: (p: { poller?: string; carddav?: string }) => void;
@@ -89,6 +90,18 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       await api.send(selectedDid, selectedContact, text.trim());
       // The sent message comes back via SSE; also refresh as a safety net.
+      await get().refreshMessages();
+      await get().refreshConversations();
+    } catch (e) {
+      set({ error: (e as Error).message });
+    }
+  },
+
+  sendMedia: async (file: Blob, contentType: string, text: string) => {
+    const { selectedDid, selectedContact } = get();
+    if (!selectedDid || !selectedContact) return;
+    try {
+      await api.sendMedia(selectedDid, selectedContact, text.trim(), file, contentType);
       await get().refreshMessages();
       await get().refreshConversations();
     } catch (e) {
