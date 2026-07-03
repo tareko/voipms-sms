@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useStore } from '../store';
 import { Avatar } from './Avatar';
+import { MessageStatus } from './MessageStatus';
 
 export function Thread() {
   const selectedDid = useStore((s) => s.selectedDid);
   const selectedContact = useStore((s) => s.selectedContact);
   const conversations = useStore((s) => s.conversations);
   const messages = useStore((s) => s.messages);
+  const retryText = useStore((s) => s.retryText);
 
   const name = useMemo(() => {
     const c = conversations.find((x) => x.contact === selectedContact);
@@ -58,7 +60,10 @@ export function Thread() {
                   </div>
                 )}
                 {caption && <span className="bubble-text">{caption}</span>}
-                <span className="bubble-time">{formatTime(m.ts)}</span>
+                <span className="bubble-meta">
+                  <span className="bubble-time">{formatTime(m.ts)}</span>
+                  <MessageStatus msg={m} onRetry={(msg) => void retryText(msg.id, msg.message)} />
+                </span>
               </div>
             </div>
           );

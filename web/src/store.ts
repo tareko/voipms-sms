@@ -20,7 +20,8 @@ interface StoreState {
   refreshConversations: () => Promise<void>;
   refreshMessages: () => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
-  sendMedia: (file: Blob, contentType: string, text: string) => Promise<void>;
+  sendMedia: (file: Blob, contentType: string, text: string, previewUrl?: string) => Promise<void>;
+  retryText: (id: string, text: string) => Promise<void>;
   markRead: (contact: string) => Promise<void>;
   setStatus: (s: AppStatus) => void;
   patchStatus: (p: { poller?: string; carddav?: string }) => void;
@@ -74,39 +75,104 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   refreshMessages: async () => {
-    const { selectedDid, selectedContact } = get();
+    const { selectedDid, selectedContact, messages } = get();
     if (!selectedDid || !selectedContact) return;
     try {
-      const messages = await api.messages(selectedDid, selectedContact);
-      set({ messages });
+      const server = await api.messages(selectedDid, selectedContact);
+      const serverIds = new Set(server.map((m) => m.id));
+      const mapped: Message[] = server.map((m) =>
+        m.type === 0 ? ({ ...m, status: 'sent' } as Message) : m
+      );
+      // preserve any in-flight optimistic sends not yet on the server
+      const inflight = messages.filter(
+        (m) => (m.status === 'sending' || m.status === 'failed') && !serverIds.has(m.id)
+      );
+      const merged = [...mapped, ...inflight].sort((a, b) => a.ts - b.ts);
+      set({ messages: merged });
     } catch (e) {
       set({ error: (e as Error).message });
     }
   },
 
   sendMessage: async (text: string) => {
-    const { selectedDid, selectedContact } = get();
-    if (!selectedDid || !selectedContact || !text.trim()) return;
+    const { selectedDid, selectedContact, messages, conversations } = get();
+    const body = text.trim();
+    if (!selectedDid || !selectedContact || !body) return;
+    const now = Date.now();
+    const optId = `opt-${now}-${Math.random().toString(36).slice(2, 6)}`;
+    const contactRaw =
+      conversations.find((c) => c.contact === selectedContact)?.contactRaw ?? selectedContact;
+    const opt = {
+      id: optId,
+      date: clientDate(now),
+      ts: now,
+      type: 0 as const,
+      did: selectedDid,
+      contact: selectedContact,
+      contactRaw,
+      message: body,
+      carrierStatus: '',
+      read: 0,
+      status: 'sending' as const,
+    };
+    set({ messages: [...messages, opt] });
+    bumpConversation(selectedContact, opt, set);
     try {
-      await api.send(selectedDid, selectedContact, text.trim());
-      // The sent message comes back via SSE; also refresh as a safety net.
-      await get().refreshMessages();
-      await get().refreshConversations();
+      const res = await api.send(selectedDid, selectedContact, body);
+      patchMessage(set, optId, { id: res.id || optId, status: 'sent' });
     } catch (e) {
+      patchMessage(set, optId, { status: 'failed' });
       set({ error: (e as Error).message });
     }
+    void get().refreshConversations();
   },
 
-  sendMedia: async (file: Blob, contentType: string, text: string) => {
+  sendMedia: async (file: Blob, contentType: string, text: string, previewUrl?: string) => {
+    const { selectedDid, selectedContact, messages, conversations } = get();
+    const body = text.trim();
+    if (!selectedDid || !selectedContact) return;
+    const now = Date.now();
+    const optId = `opt-mms-${now}-${Math.random().toString(36).slice(2, 6)}`;
+    const contactRaw =
+      conversations.find((c) => c.contact === selectedContact)?.contactRaw ?? selectedContact;
+    const opt = {
+      id: optId,
+      date: clientDate(now),
+      ts: now,
+      type: 0 as const,
+      did: selectedDid,
+      contact: selectedContact,
+      contactRaw,
+      message: body,
+      carrierStatus: '',
+      read: 0,
+      status: 'sending' as const,
+      media: previewUrl ? [{ url: previewUrl, contentType }] : undefined,
+    };
+    set({ messages: [...messages, opt] });
+    bumpConversation(selectedContact, opt, set);
+    try {
+      const res = await api.sendMedia(selectedDid, selectedContact, body, file, contentType);
+      patchMessage(set, optId, { id: res.id || optId, status: 'sent' });
+    } catch (e) {
+      patchMessage(set, optId, { status: 'failed' });
+      set({ error: (e as Error).message });
+    }
+    void get().refreshConversations();
+  },
+
+  retryText: async (id: string, text: string) => {
+    patchMessage(set, id, { status: 'sending' });
     const { selectedDid, selectedContact } = get();
     if (!selectedDid || !selectedContact) return;
     try {
-      await api.sendMedia(selectedDid, selectedContact, text.trim(), file, contentType);
-      await get().refreshMessages();
-      await get().refreshConversations();
+      const res = await api.send(selectedDid, selectedContact, text);
+      patchMessage(set, id, { id: res.id || id, status: 'sent' });
     } catch (e) {
+      patchMessage(set, id, { status: 'failed' });
       set({ error: (e as Error).message });
     }
+    void get().refreshConversations();
   },
 
   markRead: async (contact: string) => {
@@ -135,13 +201,45 @@ export const useStore = create<StoreState>((set, get) => ({
 
   onMessage: async (msg) => {
     const { selectedDid, selectedContact, messages } = get();
-    if (msg.did !== selectedDid) return;
+    if (msg.did !== selectedDid) {
+      await get().refreshConversations();
+      return;
+    }
 
     if (msg.contact === selectedContact) {
-      if (!messages.some((m) => m.id === msg.id)) {
+      const byId = messages.findIndex((m) => m.id === msg.id);
+      if (byId >= 0) {
+        const next = [...messages];
+        next[byId] = {
+          ...next[byId],
+          ...msg,
+          status: (msg.type === 0 ? 'sent' : next[byId].status) as Message['status'],
+        };
+        set({ messages: next });
+      } else if (msg.type === 0) {
+        // Merge an echoed sent message into its optimistic placeholder.
+        const ph = messages.findIndex(
+          (m) =>
+            m.type === 0 &&
+            m.message === msg.message &&
+            (m.status === 'sending' || m.status === 'sent') &&
+            Math.abs(m.ts - msg.ts) < 60000
+        );
+        if (ph >= 0) {
+          const next = [...messages];
+          next[ph] = { ...next[ph], ...msg, status: 'sent' as const };
+          set({ messages: next });
+        } else {
+          set({
+            messages: [...messages, { ...msg, status: 'sent' as const }].sort(
+              (a, b) => a.ts - b.ts
+            ),
+          });
+        }
+      } else {
         const next = [...messages, msg].sort((a, b) => a.ts - b.ts);
         set({ messages: next });
-        if (msg.type === 1 && document.visibilityState === 'visible') {
+        if (document.visibilityState === 'visible') {
           await get().markRead(msg.contact);
         }
       }
@@ -149,3 +247,35 @@ export const useStore = create<StoreState>((set, get) => ({
     await get().refreshConversations();
   },
 }));
+
+// ---------- helpers ----------
+
+function clientDate(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+type SetFn = (
+  partial: StoreState | ((s: StoreState) => Partial<StoreState> | StoreState)
+) => void;
+
+function patchMessage(
+  set: SetFn,
+  id: string,
+  patch: Partial<Message>
+): void {
+  set((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+}
+
+function bumpConversation(
+  contact: string,
+  msg: Message,
+  set: SetFn
+): void {
+  set((s) => ({
+    conversations: s.conversations
+      .map((c) => (c.contact === contact ? { ...c, lastMessage: msg, ts: msg.ts } : c))
+      .sort((a, b) => b.ts - a.ts),
+  }));
+}

@@ -17,6 +17,7 @@ export interface Message {
   carrierStatus: string;
   read: number;
   media?: MediaRef[];
+  status?: 'sending' | 'sent' | 'failed'; // client-only outgoing state
 }
 
 export interface Conversation {

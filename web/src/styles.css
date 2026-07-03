@@ -170,10 +170,12 @@ body {
 .bubble-row.in .bubble { background: var(--bubble-in); border-top-left-radius: 2px; }
 .bubble-row.out .bubble { background: var(--bubble-out); border-top-right-radius: 2px; }
 .bubble-text { white-space: pre-wrap; }
-.bubble-time {
-  display: inline-block; margin-left: 8px; font-size: 10px;
-  color: var(--text-muted); vertical-align: bottom; float: right; margin-top: 4px;
+.bubble-meta {
+  display: inline-flex; align-items: center; gap: 3px;
+  float: right; margin-left: 8px; margin-top: 4px; vertical-align: bottom;
+  font-size: 10px; color: var(--text-muted);
 }
+.bubble-time { white-space: nowrap; }
 
 /* MMS media bubbles */
 .bubble.has-media { padding: 4px; }
@@ -183,20 +185,80 @@ body {
   max-width: 100%; max-height: 280px; border-radius: 8px; display: block; cursor: zoom-in;
 }
 .bubble.has-media .bubble-text { display: block; padding: 5px 7px 2px; }
-.bubble.has-media .bubble-time { margin-right: 4px; }
+.bubble.has-media .bubble-meta { margin-right: 4px; }
+
+/* Outgoing message status icons */
+.msg-status {
+  display: inline-flex; align-items: center; position: relative; line-height: 0;
+  color: var(--text-muted);
+}
+.msg-status.sent { color: #2563eb; } /* single blue check = sent */
+.msg-status.failed { color: var(--danger); }
+.msg-status.clickable { cursor: pointer; }
+.msg-status-svg { display: block; }
+.msg-status-glyph { font-size: 12px; line-height: 1; }
+.msg-status:hover::after {
+  content: attr(data-tooltip);
+  position: absolute; bottom: 130%; right: 0; z-index: 50;
+  background: #111b21; color: #fff; padding: 5px 9px; border-radius: 6px;
+  white-space: nowrap; font-size: 11px; line-height: 1.3;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3); pointer-events: none;
+}
+@keyframes msg-spin { to { transform: rotate(360deg); } }
+.msg-status .spin { animation: msg-spin 1.1s linear infinite; transform-origin: 50% 50%; }
+@media (prefers-reduced-motion: reduce) { .msg-status .spin { animation: none; } }
 
 /* ---------- Composer ---------- */
 .composer {
   display: flex; align-items: flex-end; gap: 8px;
   padding: 10px 16px; background: var(--panel-2); border-top: 1px solid var(--border);
 }
-.attach-btn {
-  width: 40px; height: 40px; flex-shrink: 0;
-  border: none; border-radius: 50%; background: transparent; color: var(--text-muted);
-  font-size: 22px; cursor: pointer; line-height: 1;
+.composer-btn-col {
+  position: relative; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0;
 }
-.attach-btn:hover { background: #e9edef; color: var(--text); }
-.attach-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.tool-btn {
+  width: 38px; height: 38px;
+  border: none; border-radius: 50%; background: transparent; color: var(--text-muted);
+  font-size: 20px; cursor: pointer; line-height: 1; padding: 0;
+}
+.tool-btn:hover { background: #e9edef; color: var(--text); }
+.tool-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Emoji picker popover */
+.emoji-picker {
+  position: absolute; bottom: 44px; left: 0; z-index: 60;
+  width: 320px; max-height: 340px; display: flex; flex-direction: column;
+  background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.18); overflow: hidden;
+}
+.emoji-search {
+  margin: 8px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px; outline: none;
+}
+.emoji-grid {
+  flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(8, 1fr);
+  gap: 2px; padding: 4px 8px 8px;
+}
+.emoji-cell {
+  font-size: 20px; background: transparent; border: none; cursor: pointer;
+  padding: 4px; border-radius: 6px; line-height: 1;
+}
+.emoji-cell:hover { background: var(--panel-2); }
+.emoji-empty { grid-column: 1 / -1; color: var(--text-muted); font-size: 12px; padding: 12px; text-align: center; }
+
+/* Colon autocomplete dropdown */
+.emoji-suggest {
+  position: absolute; bottom: 100%; left: 0; right: 0; z-index: 55; margin-bottom: 4px;
+  background: #fff; border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15); overflow: hidden;
+}
+.emoji-suggest-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 12px; border: none; background: transparent; cursor: pointer; text-align: left;
+}
+.emoji-suggest-row.active { background: var(--panel-2); }
+.emoji-suggest-char { font-size: 20px; }
+.emoji-suggest-code { font-size: 13px; color: var(--text-muted); }
 
 .composer-input-col {
   flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0;

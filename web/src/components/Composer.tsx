@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
+import { EmojiPicker } from './EmojiPicker';
+import { searchEmojis } from '../emoji';
 
 const SMS_LIMIT = 160;
 const MMS_LIMIT = 2048;
-const MAX_BYTES = 1_100_000; // stay under voip.ms ~1.2MB/file cap
+const MAX_BYTES = 1_100_000;
 
 interface Attachment {
   blob: Blob;
@@ -11,6 +13,11 @@ interface Attachment {
   previewUrl: string;
   name: string;
   size: number;
+}
+
+interface EmojiToken {
+  start: number;
+  query: string;
 }
 
 function loadImage(file: File): Promise<HTMLImageElement> {
@@ -27,7 +34,6 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number)
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
-/** Downscale + recompress an image so it fits under MAX_BYTES. */
 async function prepareImage(file: File): Promise<{ blob: Blob; contentType: string }> {
   if (file.size <= MAX_BYTES && (file.type === 'image/jpeg' || file.type === 'image/png')) {
     return { blob: file, contentType: file.type };
@@ -52,15 +58,29 @@ async function prepareImage(file: File): Promise<{ blob: Blob; contentType: stri
   throw new Error('could not encode image');
 }
 
+/** Find a `:shortcod` token immediately before the caret. */
+function tokenAt(text: string, caret: number): EmojiToken | null {
+  const before = text.slice(0, caret);
+  const m = before.match(/(^|\s):([a-z0-9_+-]{1,20})$/i);
+  if (!m || m.index === undefined) return null;
+  return { start: m.index + m[1].length, query: m[2].toLowerCase() };
+}
+
 export function Composer() {
   const selectedContact = useStore((s) => s.selectedContact);
   const sendMessage = useStore((s) => s.sendMessage);
   const sendMedia = useStore((s) => s.sendMedia);
   const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [prepError, setPrepError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [token, setToken] = useState<EmojiToken | null>(null);
+  const [selIdx, setSelIdx] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const suggestions = token ? searchEmojis(token.query, 8) : [];
+  const showSuggest = suggestions.length > 0;
 
   useEffect(() => () => {
     if (attachment) URL.revokeObjectURL(attachment.previewUrl);
@@ -71,7 +91,42 @@ export function Composer() {
   const limit = mmsMode ? MMS_LIMIT : SMS_LIMIT;
   const overLimit = text.length > limit;
   const trimmed = text.trim();
-  const canSend = (trimmed || hasImage) && !overLimit && !sending;
+  const canSend = (trimmed || hasImage) && !overLimit;
+
+  function recomputeToken(value: string) {
+    const ta = taRef.current;
+    const caret = ta?.selectionStart ?? value.length;
+    setToken(tokenAt(value, caret));
+    setSelIdx(0);
+  }
+
+  function replaceRange(start: number, end: number, insert: string) {
+    const ta = taRef.current;
+    const next = text.slice(0, start) + insert + text.slice(end);
+    setText(next);
+    const pos = start + insert.length;
+    setToken(null);
+    requestAnimationFrame(() => {
+      if (ta) {
+        ta.selectionStart = ta.selectionEnd = pos;
+        ta.focus();
+      }
+    });
+  }
+
+  function insertAtCursor(char: string) {
+    const ta = taRef.current;
+    const caret = ta?.selectionStart ?? text.length;
+    replaceRange(caret, caret, char);
+  }
+
+  function acceptSuggestion(idx: number) {
+    const e = suggestions[idx];
+    if (!e || !token) return;
+    const ta = taRef.current;
+    const caret = ta?.selectionStart ?? text.length;
+    replaceRange(token.start, caret, e.char);
+  }
 
   async function onPickFile(file: File | undefined) {
     setPrepError(null);
@@ -97,19 +152,46 @@ export function Composer() {
 
   async function submit() {
     if (!canSend) return;
-    setSending(true);
-    try {
-      if (attachment) {
-        await sendMedia(attachment.blob, attachment.contentType, trimmed);
-        URL.revokeObjectURL(attachment.previewUrl);
-        setAttachment(null);
-        setText('');
-      } else {
-        await sendMessage(trimmed);
-        setText('');
+    const body = trimmed;
+    if (attachment) {
+      const att = attachment;
+      setAttachment(null);
+      setText('');
+      setPrepError(null);
+      await sendMedia(att.blob, att.contentType, body, att.previewUrl);
+    } else {
+      setText('');
+      setPrepError(null);
+      await sendMessage(body);
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (showSuggest) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelIdx((i) => (i + 1) % suggestions.length);
+        return;
       }
-    } finally {
-      setSending(false);
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelIdx((i) => (i - 1 + suggestions.length) % suggestions.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        acceptSuggestion(selIdx);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setToken(null);
+        return;
+      }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void submit();
     }
   }
 
@@ -117,23 +199,58 @@ export function Composer() {
 
   return (
     <div className="composer">
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={(e) => void onPickFile(e.target.files?.[0])}
-      />
-      <button
-        className="attach-btn"
-        title="Attach image"
-        onClick={() => fileRef.current?.click()}
-        disabled={sending}
-      >
-        ＋
-      </button>
+      <div className="composer-btn-col">
+        <button
+          className="tool-btn"
+          title="Emoji"
+          onClick={() => setPickerOpen((v) => !v)}
+        >
+          😀
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => void onPickFile(e.target.files?.[0])}
+        />
+        <button
+          className="tool-btn"
+          title="Attach image"
+          onClick={() => fileRef.current?.click()}
+        >
+          ＋
+        </button>
+        {pickerOpen && (
+          <EmojiPicker
+            onPick={(char) => {
+              insertAtCursor(char);
+              taRef.current?.focus();
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
+      </div>
 
       <div className="composer-input-col">
+        {showSuggest && (
+          <div className="emoji-suggest">
+            {suggestions.map((s, i) => (
+              <button
+                key={s.char + (s.shortcodes[0] ?? '')}
+                className={`emoji-suggest-row${i === selIdx ? ' active' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  acceptSuggestion(i);
+                }}
+                onMouseEnter={() => setSelIdx(i)}
+              >
+                <span className="emoji-suggest-char">{s.char}</span>
+                <span className="emoji-suggest-code">:{s.shortcodes[0]}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {attachment && (
           <div className="attach-preview">
             <img src={attachment.previewUrl} alt={attachment.name} />
@@ -155,16 +272,18 @@ export function Composer() {
         )}
         {prepError && <div className="attach-error">{prepError}</div>}
         <textarea
+          ref={taRef}
           rows={1}
           placeholder={hasImage ? 'Add a caption (optional)…' : 'Type a message…'}
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void submit();
-            }
+          onChange={(e) => {
+            setText(e.target.value);
+            recomputeToken(e.target.value);
           }}
+          onKeyUp={() => recomputeToken(text)}
+          onClick={() => recomputeToken(text)}
+          onBlur={() => setTimeout(() => setToken(null), 150)}
+          onKeyDown={onKeyDown}
         />
       </div>
 
@@ -174,7 +293,7 @@ export function Composer() {
           {mmsMode && <span className="mms-tag">MMS</span>}
         </span>
         <button className="send-btn" disabled={!canSend} onClick={() => void submit()}>
-          {sending ? '…' : 'Send'}
+          Send
         </button>
       </div>
     </div>

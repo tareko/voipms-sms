@@ -24,7 +24,8 @@ export const api = {
   conversations: (did: string) => getJson<Conversation[]>(`/conversations?did=${encodeURIComponent(did)}`),
   messages: (did: string, contact: string) =>
     getJson<Message[]>(`/messages?did=${encodeURIComponent(did)}&contact=${encodeURIComponent(contact)}`),
-  send: (did: string, contact: string, message: string) => postJson('/send', { did, contact, message }),
+  send: (did: string, contact: string, message: string) =>
+    postJson<{ ok: boolean; id: string }>('/send', { did, contact, message }),
   sendMedia: (did: string, contact: string, message: string, file: Blob, contentType: string) => {
     const fd = new FormData();
     fd.append('did', did);
