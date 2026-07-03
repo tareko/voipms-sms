@@ -214,7 +214,7 @@ body {
   padding: 10px 16px; background: var(--panel-2); border-top: 1px solid var(--border);
 }
 .composer-btn-col {
-  position: relative; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0;
+  position: relative; display: flex; flex-direction: row; gap: 2px; flex-shrink: 0;
 }
 .tool-btn {
   width: 38px; height: 38px;
@@ -261,6 +261,7 @@ body {
 .emoji-suggest-code { font-size: 13px; color: var(--text-muted); }
 
 .composer-input-col {
+  position: relative;
   flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0;
 }
 .attach-preview {

@@ -61,7 +61,8 @@ async function prepareImage(file: File): Promise<{ blob: Blob; contentType: stri
 /** Find a `:shortcod` token immediately before the caret. */
 function tokenAt(text: string, caret: number): EmojiToken | null {
   const before = text.slice(0, caret);
-  const m = before.match(/(^|\s):([a-z0-9_+-]{1,20})$/i);
+  // Colon must be at start or after a non-word char; query is letters/digits/_/-/+.
+  const m = before.match(/(^|[^a-z0-9_]):([a-z0-9_+-]{1,20})$/i);
   if (!m || m.index === undefined) return null;
   return { start: m.index + m[1].length, query: m[2].toLowerCase() };
 }

@@ -35,7 +35,6 @@ export const EMOJIS: EmojiDef[] = [
   { char: '🥱', shortcodes: ['yawn'] },
   { char: '😢', shortcodes: ['cry'] },
   { char: '😭', shortcodes: ['sob', 'crying'] },
-  { char: '😂', shortcodes: [] },
   { char: '😱', shortcodes: ['scream'] },
   { char: '😨', shortcodes: ['fearful', 'scared'] },
   { char: '😰', shortcodes: ['anxiety', 'nervous'] },
