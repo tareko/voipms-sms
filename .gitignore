@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local database (anywhere)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# secrets
+.env
+
+*.log

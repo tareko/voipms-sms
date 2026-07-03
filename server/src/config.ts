@@ -1,0 +1,42 @@
+import 'dotenv/config';
+import { resolve } from 'node:path';
+
+function warn(name: string) {
+  console.warn(`[config] ${name} is not set — that feature will be disabled until it is.`);
+}
+
+export const config = {
+  port: Number(process.env.PORT || 8317),
+  webDir: resolve(process.cwd(), process.env.WEB_DIR || '../web/dist'),
+  dbPath: resolve(process.cwd(), process.env.DB_PATH || './data/app.db'),
+  voipms: {
+    username: process.env.VOIPMS_API_USERNAME || '',
+    password: process.env.VOIPMS_API_PASSWORD || '',
+    defaultCountry: (process.env.VOIPMS_DEFAULT_COUNTRY || 'US').toUpperCase(),
+    dids: (process.env.VOIPMS_DIDS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    pollIntervalMs: Number(process.env.VOIPMS_POLL_INTERVAL_MS || 20000),
+  },
+  nextcloud: {
+    url: (process.env.NEXTCLOUD_URL || '').replace(/\/+$/, ''),
+    username: process.env.NEXTCLOUD_USERNAME || '',
+    password: process.env.NEXTCLOUD_PASSWORD || '',
+    addressbook: process.env.NEXTCLOUD_ADDRESSBOOK || '',
+    syncIntervalMs: Number(process.env.CONTACTS_SYNC_INTERVAL_MS || 1800000),
+  },
+  webhook: {
+    key: process.env.WEBHOOK_KEY || '',
+    publicUrl: process.env.PUBLIC_WEBHOOK_URL || '',
+  },
+};
+
+export function checkConfig() {
+  if (!config.voipms.username || !config.voipms.password) {
+    warn('VOIPMS_API_USERNAME / VOIPMS_API_PASSWORD');
+  }
+  if (config.nextcloud.url && (!config.nextcloud.username || !config.nextcloud.password)) {
+    warn('NEXTCLOUD_USERNAME / NEXTCLOUD_PASSWORD');
+  }
+}

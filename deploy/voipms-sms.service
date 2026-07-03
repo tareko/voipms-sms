@@ -1,0 +1,25 @@
+[Unit]
+Description=voip.ms SMS local backend (UI + API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Path to the project. Adjust if you cloned elsewhere.
+WorkingDirectory=%h/workspace/voipms-frontend/server
+EnvironmentFile=%h/workspace/voipms-frontend/.env
+ExecStart=%h/.npm-global/bin/tsx src/index.ts
+# If tsx isn't on PATH globally, use npx instead:
+# ExecStart=/usr/bin/npx tsx src/index.ts
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=%h/workspace/voipms-frontend/data %h/workspace/voipms-frontend/web/dist
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

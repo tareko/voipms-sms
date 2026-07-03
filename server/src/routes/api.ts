@@ -1,0 +1,172 @@
+import { Router } from 'express';
+import { config } from '../config.js';
+import { getConversations, getThread, markThreadRead, searchContacts } from '../store/db.js';
+import { sendSMS, setSmsCallback } from '../voipms/client.js';
+import { runPollOnce, getPollerStatus, getActiveDids } from '../voipms/poller.js';
+import { syncContacts, getCarddavStatus } from '../contacts/carddav.js';
+import { broadcast } from '../realtime/sse.js';
+import { ingest } from '../services/ingest.js';
+import type { NormalizedSms } from '../voipms/client.js';
+import { normalizeTel } from '../contacts/match.js';
+
+export const api = Router();
+
+function nowVoipDate(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** voip.ms sendSMS expects 10-digit NANP numbers (no leading country code). */
+function toVoipNumber(tel: string): string {
+  const digits = tel.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
+  if (digits.length === 10) return digits;
+  return digits || tel;
+}
+
+api.get('/status', (_req, res) => {
+  res.json({
+    poller: getPollerStatus(),
+    carddav: getCarddavStatus(),
+    webhook: { configured: Boolean(config.webhook.key), publicUrl: config.webhook.publicUrl },
+    dids: getActiveDids(),
+  });
+});
+
+api.get('/dids', (_req, res) => {
+  res.json(getActiveDids());
+});
+
+api.get('/conversations', (req, res) => {
+  const did = String(req.query.did || '');
+  if (!did) return res.status(400).json({ error: 'did required' });
+  res.json(getConversations(normalizeTel(did) ?? did));
+});
+
+api.get('/messages', (req, res) => {
+  const did = normalizeTel(String(req.query.did || '')) ?? String(req.query.did || '');
+  const contact = normalizeTel(String(req.query.contact || '')) ?? String(req.query.contact || '');
+  if (!did || !contact) return res.status(400).json({ error: 'did and contact required' });
+  const limit = Number(req.query.limit || 500);
+  res.json(getThread(did, contact, limit));
+});
+
+api.post('/send', async (req, res) => {
+  try {
+    const { did, contact, message } = req.body as {
+      did: string;
+      contact: string;
+      message: string;
+    };
+    if (!did || !contact || !message) return res.status(400).json({ error: 'did, contact, message required' });
+
+    const didNorm = normalizeTel(did) ?? did;
+    const contactNorm = normalizeTel(contact) ?? contact;
+    const id = await sendSMS(toVoipNumber(didNorm), toVoipNumber(contactNorm), message);
+
+    const sms: NormalizedSms = {
+      id: id || `local-${Date.now()}`,
+      date: nowVoipDate(),
+      ts: Date.now(),
+      type: 0,
+      did: didNorm,
+      contact: contactNorm,
+      contactRaw: contact,
+      message,
+      carrierStatus: '',
+    };
+    ingest(sms, 'send');
+    res.json({ ok: true, id: sms.id });
+  } catch (err) {
+    console.error('[api] send failed:', (err as Error).message);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+api.post('/markread', (req, res) => {
+  const { did, contact } = req.body as { did: string; contact: string };
+  if (!did || !contact) return res.status(400).json({ error: 'did and contact required' });
+  markThreadRead(normalizeTel(did) ?? did, normalizeTel(contact) ?? contact);
+  broadcast({ type: 'status', data: { poller: getPollerStatus(), carddav: getCarddavStatus() } });
+  res.json({ ok: true });
+});
+
+api.get('/contacts', (req, res) => {
+  const q = String(req.query.q || '');
+  res.json(searchContacts(q, 50));
+});
+
+api.post('/contacts/refresh', async (_req, res) => {
+  const count = await syncContacts();
+  broadcast({ type: 'contacts-refreshed', data: { count } });
+  res.json({ ok: true, count });
+});
+
+api.post('/poll', async (_req, res) => {
+  const n = await runPollOnce();
+  res.json({ ok: true, newMessages: n });
+});
+
+/** Apply the voip.ms SMS URL callback to a DID (Milestone 2 helper). */
+api.post('/webhook/apply', async (req, res) => {
+  try {
+    const { did } = req.body as { did: string };
+    if (!did) return res.status(400).json({ error: 'did required' });
+    if (!config.webhook.key || !config.webhook.publicUrl) {
+      return res.status(400).json({ error: 'WEBHOOK_KEY and PUBLIC_WEBHOOK_URL must be set' });
+    }
+    const url = `${config.webhook.publicUrl}/api/webhook/inbound?to={TO}&from={FROM}&message={MESSAGE}&id={ID}&date={TIMESTAMP}&media={MEDIA}&key=${config.webhook.key}`;
+    await setSmsCallback(did, url, true);
+    res.json({ ok: true, url });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * voip.ms inbound SMS callback. Accepts GET (per spec). voip.ms may delimit params
+ * with ';' or '&', so we parse both. Must respond with the literal text "ok".
+ */
+api.all('/webhook/inbound', (rawReq, res) => {
+  const req = rawReq;
+  try {
+    if (!config.webhook.key) return res.status(503).send('webhook disabled');
+    const params: Record<string, string> = {};
+    const qIndex = req.url.indexOf('?');
+    const qs = qIndex >= 0 ? req.url.slice(qIndex + 1) : '';
+    for (const pair of qs.split(/[&;]/)) {
+      if (!pair) continue;
+      const [k, ...rest] = pair.split('=');
+      params[decodeURIComponent(k)] = decodeURIComponent(rest.join('='));
+    }
+
+    if (!params.key || params.key !== config.webhook.key) {
+      return res.status(401).send('unauthorized');
+    }
+
+    const from = params.from || params.FROM || '';
+    const to = params.to || params.TO || '';
+    const id = params.id || params.ID || `hw-${Date.now()}`;
+    const date = params.date || params.TIMESTAMP || nowVoipDate();
+    const text = params.message || params.MESSAGE || '';
+    if (!from || !to) return res.send('ok'); // nothing to do, still ack
+
+    const sms: NormalizedSms = {
+      id: String(id),
+      date,
+      ts: new Date(date.replace(' ', 'T')).getTime() || Date.now(),
+      type: 1,
+      did: to,
+      contact: from,
+      contactRaw: from,
+      message: text.replace(/\+/g, ' '),
+      carrierStatus: '',
+    };
+    ingest(sms, 'webhook');
+    res.send('ok');
+  } catch (err) {
+    console.error('[webhook] error:', (err as Error).message);
+    res.send('ok'); // always ack so voip.ms doesn't retry-loop
+  }
+});
