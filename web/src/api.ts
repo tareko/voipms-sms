@@ -37,6 +37,8 @@ export const api = {
       return (await r.json()) as { ok: boolean; id: string };
     });
   },
+  react: (did: string, contact: string, messageId: string, emoji: string) =>
+    postJson<{ ok: boolean; id: string }>('/react', { did, contact, messageId, emoji }),
   markRead: (did: string, contact: string) => postJson('/markread', { did, contact }),
   contacts: (q: string) => getJson<Contact[]>(`/contacts?q=${encodeURIComponent(q)}`),
   refreshContacts: () => postJson('/contacts/refresh', {}),

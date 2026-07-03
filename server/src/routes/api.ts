@@ -3,13 +3,15 @@ import multer from 'multer';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { config } from '../config.js';
-import { getConversations, getThread, markThreadRead, searchContacts } from '../store/db.js';
+import { getConversations, getThread, getMessage, getReactionsForMessage, addReaction, markThreadRead, searchContacts } from '../store/db.js';
 import { sendSMS, sendMMS, setSmsCallback } from '../voipms/client.js';
 import { runPollOnce, getPollerStatus, getActiveDids } from '../voipms/poller.js';
 import { syncContacts, getCarddavStatus } from '../contacts/carddav.js';
 import { broadcast } from '../realtime/sse.js';
 import { ingest } from '../services/ingest.js';
 import { saveUploadedMedia, getMediaPath, mediaContentType } from '../services/media.js';
+import { buildReactionText } from '../reactions.js';
+import { backfillReactions } from '../services/backfill.js';
 import type { NormalizedSms } from '../voipms/client.js';
 import { normalizeTel } from '../contacts/match.js';
 
@@ -154,6 +156,52 @@ api.get('/media/:file', (req, res) => {
   res.sendFile(path);
 });
 
+/** React to a message (sends the iMessage-style fallback text). */
+api.post('/react', async (req, res) => {
+  try {
+    const { did, contact, messageId, emoji } = req.body as {
+      did: string;
+      contact: string;
+      messageId: string;
+      emoji: string;
+    };
+    if (!did || !contact || !messageId || !emoji) {
+      return res.status(400).json({ error: 'did, contact, messageId, emoji required' });
+    }
+    const target = getMessage(messageId);
+    if (!target) return res.status(404).json({ error: 'message not found' });
+
+    let targetText = (target.message || '').trim();
+    if (!targetText && target.media?.length) targetText = 'an image';
+    const body = buildReactionText(emoji, targetText);
+    if (!body) return res.status(400).json({ error: 'unsupported emoji' });
+
+    const didNorm = normalizeTel(did) ?? did;
+    const contactNorm = normalizeTel(contact) ?? contact;
+    const id = await sendSMS(toVoipNumber(didNorm), toVoipNumber(contactNorm), body);
+
+    addReaction({
+      id: id || `react-${Date.now()}`,
+      targetId: messageId,
+      did: didNorm,
+      contact: contactNorm,
+      emoji,
+      fromTel: 'me',
+      ts: Date.now(),
+    });
+
+    const updated = getMessage(messageId);
+    if (updated) {
+      updated.reactions = getReactionsForMessage(messageId);
+      broadcast({ type: 'message-updated', data: updated });
+    }
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('[api] react failed:', (err as Error).message);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 api.post('/markread', (req, res) => {
   const { did, contact } = req.body as { did: string; contact: string };
   if (!did || !contact) return res.status(400).json({ error: 'did and contact required' });
@@ -176,6 +224,12 @@ api.post('/contacts/refresh', async (_req, res) => {
 api.post('/poll', async (_req, res) => {
   const n = await runPollOnce();
   res.json({ ok: true, newMessages: n });
+});
+
+/** Convert existing iMessage-style reaction texts into reaction badges. */
+api.post('/backfill-reactions', (_req, res) => {
+  const result = backfillReactions();
+  res.json({ ok: true, ...result });
 });
 
 /** Apply the voip.ms SMS URL callback to a DID (Milestone 2 helper). */

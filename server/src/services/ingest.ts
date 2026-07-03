@@ -1,8 +1,19 @@
-import { insertMessage, getContactName, markThreadRead, messageExists } from '../store/db.js';
+import {
+  insertMessage,
+  getContactName,
+  markThreadRead,
+  messageExists,
+  getMessage,
+  getReactionsForMessage,
+  getThread,
+  reactionExists,
+  addReaction,
+} from '../store/db.js';
 import { broadcast } from '../realtime/sse.js';
 import { notifyNewMessage } from '../notify/native.js';
 import { normalizeTel } from '../contacts/match.js';
 import { downloadAndCacheMedia } from './media.js';
+import { detectReaction, matchTarget } from '../reactions.js';
 import type { NormalizedSms } from '../voipms/client.js';
 import type { MediaRef, Message } from '../types.js';
 
@@ -24,16 +35,66 @@ function toMessage(sms: NormalizedSms, media?: MediaRef[]): Message {
   };
 }
 
+/** Broadcast a target message refreshed with its current reactions. */
+function broadcastUpdated(targetId: string): void {
+  const msg = getMessage(targetId);
+  if (!msg) return;
+  msg.reactions = getReactionsForMessage(targetId);
+  broadcast({ type: 'message-updated', data: msg });
+}
+
 /**
- * Ingest a voip.ms message. For MMS, downloads + caches media (unless already
- * stored, or unless prebuilt media is supplied — e.g. a sent MMS). Inserts,
- * broadcasts via SSE, and fires a native notification (if received & new).
+ * Handle an iMessage-style reaction text. Records it (dedup by voip.ms id),
+ * attaches it to the matched message if found (and suppresses the text bubble),
+ * otherwise falls through so the raw text is still shown.
+ * Returns true if the message was consumed as a reaction (do not store as text).
+ */
+function handleReaction(sms: NormalizedSms): boolean {
+  const detected = detectReaction(sms.message);
+  if (!detected) return false;
+  if (reactionExists(sms.id)) return true; // already processed
+
+  const did = normalizeTel(sms.did) ?? sms.did;
+  const contact = normalizeTel(sms.contact) ?? sms.contactRaw;
+  const fromTel = sms.type === 1 ? contact : 'me';
+
+  const recent = getThread(did, contact, 200);
+  const target = matchTarget(recent, detected.quoted);
+
+  addReaction({
+    id: sms.id,
+    targetId: target?.id ?? null,
+    did,
+    contact,
+    emoji: detected.emoji,
+    fromTel,
+    ts: sms.ts,
+  });
+
+  if (target) {
+    broadcastUpdated(target.id);
+    if (sms.type === 1) {
+      const name = getContactName(contact) ?? sms.contactRaw;
+      notifyNewMessage({ name, text: `reacted ${detected.emoji}` });
+    }
+    return true; // suppress the "Liked …" text bubble
+  }
+  return false; // no target → keep as a normal text message
+}
+
+/**
+ * Ingest a voip.ms message. Reactions are detected and attached as badges.
+ * For MMS, downloads + caches media (unless already stored, or prebuilt media
+ * is supplied — e.g. a sent MMS). Inserts, broadcasts via SSE, and fires a
+ * native notification (if received & new).
  */
 export async function ingest(
   sms: NormalizedSms,
   source: 'poll' | 'webhook' | 'send',
   prebuiltMedia?: MediaRef[]
 ): Promise<boolean> {
+  if (handleReaction(sms)) return true;
+
   let media = prebuiltMedia;
   if (!media && sms.mediaUrls && sms.mediaUrls.length && !messageExists(sms.id)) {
     const refs = await Promise.all(sms.mediaUrls.map((u) => downloadAndCacheMedia(u)));

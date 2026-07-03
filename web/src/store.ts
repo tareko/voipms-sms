@@ -22,11 +22,13 @@ interface StoreState {
   sendMessage: (text: string) => Promise<void>;
   sendMedia: (file: Blob, contentType: string, text: string, previewUrl?: string) => Promise<void>;
   retryText: (id: string, text: string) => Promise<void>;
+  reactMessage: (messageId: string, emoji: string) => Promise<void>;
   markRead: (contact: string) => Promise<void>;
   setStatus: (s: AppStatus) => void;
   patchStatus: (p: { poller?: string; carddav?: string }) => void;
   setDids: (d: Did[]) => void;
   onMessage: (msg: Message) => Promise<void>;
+  onMessageUpdated: (msg: Message) => void;
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -175,6 +177,33 @@ export const useStore = create<StoreState>((set, get) => ({
     void get().refreshConversations();
   },
 
+  reactMessage: async (messageId: string, emoji: string) => {
+    const { selectedDid, selectedContact, messages } = get();
+    if (!selectedDid || !selectedContact) return;
+    const next = messages.map((m) =>
+      m.id === messageId
+        ? {
+            ...m,
+            reactions: setMyReaction(m.reactions, emoji),
+          }
+        : m
+    );
+    set({ messages: next });
+    try {
+      await api.react(selectedDid, selectedContact, messageId, emoji);
+      // server broadcasts message-updated to reconcile
+    } catch (e) {
+      set({
+        messages: get().messages.map((m) =>
+          m.id === messageId
+            ? { ...m, reactions: (m.reactions ?? []).filter((r) => r.from !== 'me') }
+            : m
+        ),
+        error: (e as Error).message,
+      });
+    }
+  },
+
   markRead: async (contact: string) => {
     const did = get().selectedDid;
     if (!did) return;
@@ -246,9 +275,32 @@ export const useStore = create<StoreState>((set, get) => ({
     }
     await get().refreshConversations();
   },
+
+  onMessageUpdated: (msg) => {
+    const { selectedDid, selectedContact, messages } = get();
+    if (msg.did !== selectedDid) {
+      void get().refreshConversations();
+      return;
+    }
+    if (msg.contact === selectedContact) {
+      const idx = messages.findIndex((m) => m.id === msg.id);
+      if (idx >= 0) {
+        const next = [...messages];
+        // keep client-only status from the existing bubble
+        next[idx] = { ...msg, status: messages[idx].status };
+        set({ messages: next });
+      }
+    }
+    void get().refreshConversations();
+  },
 }));
 
 // ---------- helpers ----------
+
+function setMyReaction(reactions: Message['reactions'], emoji: string) {
+  const others = (reactions ?? []).filter((r) => r.from !== 'me');
+  return [...others, { emoji, from: 'me' }];
+}
 
 function clientDate(ts: number): string {
   const d = new Date(ts);

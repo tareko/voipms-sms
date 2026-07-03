@@ -5,6 +5,7 @@ import type { SseEvent } from '../types';
 
 export function useSSE() {
   const onMessage = useStore((s) => s.onMessage);
+  const onMessageUpdated = useStore((s) => s.onMessageUpdated);
   const setDids = useStore((s) => s.setDids);
   const patchStatus = useStore((s) => s.patchStatus);
   const refreshConversations = useStore((s) => s.refreshConversations);
@@ -40,6 +41,9 @@ export function useSSE() {
             notifyNewMessage(event.data, selContactRef.current, selDidRef.current);
           }
           break;
+        case 'message-updated':
+          onMessageUpdated(event.data);
+          break;
         case 'dids':
           setDids(event.data);
           break;
@@ -53,5 +57,5 @@ export function useSSE() {
     };
 
     return () => es.close();
-  }, [onMessage, setDids, patchStatus, refreshConversations, refreshMessages]);
+  }, [onMessage, onMessageUpdated, setDids, patchStatus, refreshConversations, refreshMessages]);
 }

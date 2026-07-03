@@ -5,6 +5,11 @@ export interface MediaRef {
   contentType: string;
 }
 
+export interface ReactionRef {
+  emoji: string;
+  from?: string;
+}
+
 export interface Message {
   id: string;
   date: string;
@@ -17,6 +22,7 @@ export interface Message {
   carrierStatus: string;
   read: number;
   media?: MediaRef[];
+  reactions?: ReactionRef[];
   status?: 'sending' | 'sent' | 'failed'; // client-only outgoing state
 }
 
@@ -50,6 +56,7 @@ export interface AppStatus {
 
 export type SseEvent =
   | { type: 'message'; data: Message }
+  | { type: 'message-updated'; data: Message }
   | { type: 'contacts-refreshed'; data: { count: number } }
   | { type: 'dids'; data: Did[] }
   | { type: 'status'; data: { poller: string; carddav: string } };

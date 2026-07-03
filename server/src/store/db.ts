@@ -44,6 +44,18 @@ export function initDb() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS reaction_events (
+      id        TEXT PRIMARY KEY,   -- voip.ms id of the reaction text (dedup)
+      target_id TEXT,               -- matched message id (nullable if unmatched)
+      did       TEXT NOT NULL,
+      contact   TEXT NOT NULL,
+      emoji     TEXT NOT NULL,
+      from_tel  TEXT,
+      ts        INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_react_thread ON reaction_events(did, contact);
+    CREATE INDEX IF NOT EXISTS idx_react_target ON reaction_events(target_id);
   `);
 
   // Additive migration: add `media` column for MMS attachments (existing DBs).
@@ -136,13 +148,89 @@ export function getThread(did: string, contact: string, limit = 500): Message[] 
       `SELECT * FROM messages WHERE did = ? AND contact = ? ORDER BY ts ASC LIMIT ?`
     )
     .all(did, contact, limit) as Record<string, unknown>[];
-  return rows.map(rowToMessage);
+  const messages = rows.map(rowToMessage);
+  return attachReactions(messages, did, contact);
 }
 
 export function markThreadRead(did: string, contact: string): void {
   getDb()
     .prepare(`UPDATE messages SET read = 1 WHERE did = ? AND contact = ? AND type = 1 AND read = 0`)
     .run(did, contact);
+}
+
+export function getMessage(id: string): Message | null {
+  const row = getDb().prepare('SELECT * FROM messages WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? rowToMessage(row) : null;
+}
+
+export function getReactionsForMessage(id: string): import('../types.js').ReactionRef[] {
+  const rows = getDb()
+    .prepare('SELECT emoji, from_tel FROM reaction_events WHERE target_id = ?')
+    .all(id) as { emoji: string; from_tel: string | null }[];
+  return rows.map((r) => ({ emoji: r.emoji, from: r.from_tel ?? undefined }));
+}
+
+export function deleteMessage(id: string): void {
+  getDb().prepare('DELETE FROM messages WHERE id = ?').run(id);
+}
+
+// ---------- reactions ----------
+interface ReactionRow {
+  id: string;
+  target_id: string | null;
+  emoji: string;
+  from_tel: string | null;
+}
+
+export function reactionExists(id: string): boolean {
+  return Boolean(getDb().prepare('SELECT 1 FROM reaction_events WHERE id = ?').get(id));
+}
+
+export function addReaction(ev: {
+  id: string;
+  targetId: string | null;
+  did: string;
+  contact: string;
+  emoji: string;
+  fromTel?: string;
+  ts: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO reaction_events(id, target_id, did, contact, emoji, from_tel, ts)
+       VALUES(?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET target_id = excluded.target_id, emoji = excluded.emoji`
+    )
+    .run(ev.id, ev.targetId, ev.did, ev.contact, ev.emoji, ev.fromTel ?? null, ev.ts);
+}
+
+/** Group reactions by target message id for a thread. */
+function reactionsForThread(did: string, contact: string): Map<string, import('../types.js').ReactionRef[]> {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, target_id, emoji, from_tel FROM reaction_events
+       WHERE did = ? AND contact = ? AND target_id IS NOT NULL`
+    )
+    .all(did, contact) as ReactionRow[];
+  const map = new Map<string, import('../types.js').ReactionRef[]>();
+  for (const r of rows) {
+    if (!r.target_id) continue;
+    const list = map.get(r.target_id) ?? [];
+    list.push({ emoji: r.emoji, from: r.from_tel ?? undefined });
+    map.set(r.target_id, list);
+  }
+  return map;
+}
+
+function attachReactions(messages: Message[], did: string, contact: string): Message[] {
+  const byTarget = reactionsForThread(did, contact);
+  if (byTarget.size === 0) return messages;
+  return messages.map((m) => {
+    const r = byTarget.get(m.id);
+    return r && r.length ? { ...m, reactions: r } : m;
+  });
 }
 
 export function getMaxMessageId(): bigint {

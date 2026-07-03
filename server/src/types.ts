@@ -5,6 +5,11 @@ export interface MediaRef {
   contentType: string;
 }
 
+export interface ReactionRef {
+  emoji: string;
+  from?: string; // normalized tel of the reactor ('me' for our own)
+}
+
 export interface Message {
   id: string;
   date: string; // 'YYYY-MM-DD HH:MM:SS' (voip.ms format)
@@ -17,6 +22,7 @@ export interface Message {
   carrierStatus: string;
   read: number; // 0/1 (local only)
   media?: MediaRef[]; // MMS attachments (cached locally)
+  reactions?: ReactionRef[]; // tapback reactions (parsed from iMessage fallback)
 }
 
 export interface Conversation {
@@ -42,6 +48,7 @@ export interface Did {
 
 export type SseEvent =
   | { type: 'message'; data: Message }
+  | { type: 'message-updated'; data: Message }
   | { type: 'conversation-updated'; data: Conversation }
   | { type: 'contacts-refreshed'; data: { count: number } }
   | { type: 'dids'; data: Did[] }
