@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Voip.ms text
+Name[en]=Voip.ms text
+GenericName=SMS / MMS Messenger
+Comment=Send and receive SMS and MMS messages via voip.ms
+Exec=xdg-open http://localhost:8317
+Icon=voipms-sms
+Terminal=false
+Categories=Network;InstantMessaging;Telephony;
+Keywords=sms;mms;text;message;voip;voipms;
+StartupNotify=false

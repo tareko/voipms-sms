@@ -1,32 +1,35 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
-import notifier from 'node-notifier';
-import { projectRoot } from '../config.js';
-
-const iconPath = resolve(projectRoot, 'assets', 'icon.png');
+import { spawn } from 'node:child_process';
 
 export interface NewMessageNotify {
   name: string;
   text: string;
 }
 
+const APP_NAME = 'Voip.ms text';
+const DESKTOP_ENTRY = 'voipms-sms'; // matches ~/.local/share/applications/voipms-sms.desktop
+const ICON = 'voipms-sms'; // matches ~/.local/share/icons/hicolor/scalable/apps/voipms-sms.svg
+
 /**
- * Fire a native GNOME notification (notify-send on Linux). Informative, auto-dismiss.
- * Options cast because @types/node-notifier (v8) doesn't cover v10's `appID`.
+ * Fire a native GNOME notification. We call notify-send directly so we can set
+ * `--app-name` and the `desktop-entry` hint — that's what makes GNOME attribute
+ * the banner to "Voip.ms text" with the phone icon instead of "notify-send".
+ * Run deploy/install-desktop.sh once to install the desktop entry + icon.
  */
 export function notifyNewMessage({ name, text }: NewMessageNotify): void {
+  const body = text.length > 200 ? text.slice(0, 200) + '…' : text;
+  const args = [
+    `--app-name=${APP_NAME}`,
+    `--icon=${ICON}`,
+    '--urgency=normal',
+    `--hint=string:desktop-entry:${DESKTOP_ENTRY}`,
+    name,
+    body,
+  ];
   try {
-    const options: Record<string, unknown> = {
-      title: name,
-      message: text.length > 200 ? text.slice(0, 200) + '…' : text,
-      appID: 'voipms-sms',
-      timeout: 8000,
-    };
-    if (existsSync(iconPath)) options.icon = iconPath;
-    notifier.notify(options as never, (err: Error | null | undefined) => {
-      if (err) console.error('[notify]', err.message);
-    });
-  } catch (err) {
-    console.error('[notify]', (err as Error).message);
+    const child = spawn('notify-send', args, { stdio: 'ignore' });
+    child.on('error', (e) => console.error('[notify] notify-send failed:', e.message));
+    child.unref();
+  } catch (e) {
+    console.error('[notify]', (e as Error).message);
   }
 }
