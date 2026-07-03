@@ -3,6 +3,8 @@ import {
   getContactName,
   markThreadRead,
   messageExists,
+  isDuplicateMessage,
+  isDuplicateReaction,
   getMessage,
   getReactionsForMessage,
   getThread,
@@ -58,6 +60,9 @@ function handleReaction(sms: NormalizedSms): boolean {
   const contact = normalizeTel(sms.contact) ?? sms.contactRaw;
   const fromTel = sms.type === 1 ? contact : 'me';
 
+  // Group-MMS leg duplicate (different id, same content) — skip.
+  if (isDuplicateReaction(did, contact, detected.emoji, sms.ts)) return true;
+
   const recent = getThread(did, contact, 200);
   const target = matchTarget(recent, detected.quoted);
 
@@ -102,6 +107,8 @@ export async function ingest(
     if (!media.length) media = undefined;
   }
   const msg = toMessage(sms, media);
+  // Group-MMS leg duplicate (different id, same content+timestamp) — skip.
+  if (isDuplicateMessage(msg.did, msg.contact, msg.message, msg.ts)) return false;
   const inserted = insertMessage(msg, source);
   if (inserted) {
     broadcast({ type: 'message', data: { ...msg } });

@@ -117,6 +117,32 @@ export function messageExists(id: string): boolean {
   return Boolean(row);
 }
 
+/**
+ * Content-based duplicate check. voip.ms expands a group MMS into one row per
+ * "leg" (same sender + body + timestamp, different ids); dedup by content so we
+ * don't show the same bubble twice. A human re-sending identical text would
+ * have a different second-precision timestamp, so this is safe.
+ */
+export function isDuplicateMessage(did: string, contact: string, message: string, ts: number): boolean {
+  return Boolean(
+    getDb()
+      .prepare('SELECT 1 FROM messages WHERE did = ? AND contact = ? AND message = ? AND ts = ? LIMIT 1')
+      .get(did, contact, message, ts)
+  );
+}
+
+/** Remove existing duplicate bubbles (keeps the first of each content group). */
+export function dedupMessages(): number {
+  const res = getDb()
+    .prepare(
+      `DELETE FROM messages WHERE rowid NOT IN (
+         SELECT MIN(rowid) FROM messages GROUP BY did, contact, message, ts
+       )`
+    )
+    .run();
+  return res.changes;
+}
+
 /** Insert a message; returns true if it was new. */
 export function insertMessage(msg: Message, source: 'poll' | 'webhook' | 'send' = 'poll'): boolean {
   const res = getDb()
@@ -192,6 +218,26 @@ export function getReactionEvent(id: string): { target_id: string | null } | und
   return getDb().prepare('SELECT target_id FROM reaction_events WHERE id = ?').get(id) as
     | { target_id: string | null }
     | undefined;
+}
+
+export function isDuplicateReaction(did: string, contact: string, emoji: string, ts: number): boolean {
+  return Boolean(
+    getDb()
+      .prepare('SELECT 1 FROM reaction_events WHERE did = ? AND contact = ? AND emoji = ? AND ts = ? LIMIT 1')
+      .get(did, contact, emoji, ts)
+  );
+}
+
+/** Remove duplicate reaction events (keeps the first of each group). */
+export function dedupReactionEvents(): number {
+  const res = getDb()
+    .prepare(
+      `DELETE FROM reaction_events WHERE rowid NOT IN (
+         SELECT MIN(rowid) FROM reaction_events GROUP BY did, contact, emoji, ts
+       )`
+    )
+    .run();
+  return res.changes;
 }
 
 export function addReaction(ev: {

@@ -3,7 +3,7 @@ import multer from 'multer';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { config } from '../config.js';
-import { getConversations, getThread, getMessage, getReactionsForMessage, addReaction, markThreadRead, searchContacts } from '../store/db.js';
+import { getConversations, getThread, getMessage, getReactionsForMessage, addReaction, dedupMessages, dedupReactionEvents, markThreadRead, searchContacts } from '../store/db.js';
 import { sendSMS, sendMMS, setSmsCallback } from '../voipms/client.js';
 import { runPollOnce, getPollerStatus, getActiveDids } from '../voipms/poller.js';
 import { syncContacts, getCarddavStatus } from '../contacts/carddav.js';
@@ -230,6 +230,13 @@ api.post('/poll', async (_req, res) => {
 api.post('/backfill-reactions', (_req, res) => {
   const result = backfillReactions();
   res.json({ ok: true, ...result });
+});
+
+/** Remove duplicate bubbles created by voip.ms group-MMS leg expansion. */
+api.post('/dedup', (_req, res) => {
+  const messages = dedupMessages();
+  const reactions = dedupReactionEvents();
+  res.json({ ok: true, removedMessages: messages, removedReactions: reactions });
 });
 
 /** Apply the voip.ms SMS URL callback to a DID (Milestone 2 helper). */
