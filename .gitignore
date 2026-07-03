@@ -8,6 +8,9 @@ dist/
 *.db-shm
 *.db-wal
 
+# cached MMS media (runtime data)
+data/media/
+
 # secrets
 .env
 

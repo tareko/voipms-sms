@@ -177,6 +177,30 @@ export async function getMMS(params: GetSmsParams): Promise<NormalizedSms[]> {
 }
 
 /**
+ * Fetch media URLs for a specific MMS. getMMS frequently returns media fields
+ * empty even for image MMS, so this is the reliable way to discover attachments.
+ * The response `media` is an object keyed "1".."3" (or sometimes an array).
+ */
+export async function getMediaMMS(id: string): Promise<string[]> {
+  let data: Record<string, unknown>;
+  try {
+    data = await call('getMediaMMS', { id });
+  } catch (e) {
+    if (e instanceof VoipMsError && (e.code === 'no_sms' || e.code === 'no_mms')) return [];
+    throw e;
+  }
+  const media = data.media;
+  const urls: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === 'string' && v && !urls.includes(v)) urls.push(v);
+  };
+  if (Array.isArray(media)) for (const m of media) push(m);
+  else if (media && typeof media === 'object')
+    for (const v of Object.values(media as Record<string, unknown>)) push(v);
+  return urls;
+}
+
+/**
  * Send an MMS via POST multipart/form-data. GET cannot carry an image
  * (voip.ms' Cloudflare front rejects long URLs), and the endpoint MUST be the
  * no-www host (www.voip.ms 301-redirects and drops the body -> missing_method).

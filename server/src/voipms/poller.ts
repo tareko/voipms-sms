@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { getSMS, getMMS, getDIDsInfo, type NormalizedSms } from './client.js';
+import { getSMS, getMMS, getMediaMMS, getDIDsInfo, type NormalizedSms } from './client.js';
 import { getCachedDids, getMaxMessageId, messageExists, setDids } from '../store/db.js';
 import { ingest } from '../services/ingest.js';
 import { broadcast } from '../realtime/sse.js';
@@ -74,7 +74,20 @@ async function pollOnce(): Promise<number> {
       for (const m of mms) {
         const key = `mms:${m.id}`;
         if (messageExists(key)) continue;
-        const namespaced = { ...m, id: key };
+        // getMMS omits media inline even for image MMS — fetch via getMediaMMS.
+        let mediaUrls = m.mediaUrls;
+        if (!mediaUrls || !mediaUrls.length) {
+          try {
+            mediaUrls = await getMediaMMS(m.id);
+          } catch (err) {
+            console.error(`[poller] getMediaMMS failed for ${m.id}:`, (err as Error).message);
+          }
+        }
+        const namespaced = {
+          ...m,
+          id: key,
+          mediaUrls: mediaUrls && mediaUrls.length ? mediaUrls : undefined,
+        };
         if (await ingest(namespaced, 'poll')) newCount++;
       }
     }
