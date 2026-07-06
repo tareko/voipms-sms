@@ -230,12 +230,12 @@ export const useStore = create<StoreState>((set, get) => ({
 
   onMessage: async (msg) => {
     const { selectedDid, selectedContact, messages } = get();
-    if (msg.did !== selectedDid) {
+    if (!sameTel(msg.did, selectedDid ?? '')) {
       await get().refreshConversations();
       return;
     }
 
-    if (msg.contact === selectedContact) {
+    if (sameTel(msg.contact, selectedContact ?? '')) {
       const byId = messages.findIndex((m) => m.id === msg.id);
       if (byId >= 0) {
         const next = [...messages];
@@ -278,11 +278,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
   onMessageUpdated: (msg) => {
     const { selectedDid, selectedContact, messages } = get();
-    if (msg.did !== selectedDid) {
+    if (!sameTel(msg.did, selectedDid ?? '')) {
       void get().refreshConversations();
       return;
     }
-    if (msg.contact === selectedContact) {
+    if (sameTel(msg.contact, selectedContact ?? '')) {
       const idx = messages.findIndex((m) => m.id === msg.id);
       if (idx >= 0) {
         const next = [...messages];
@@ -300,6 +300,11 @@ export const useStore = create<StoreState>((set, get) => ({
 function setMyReaction(reactions: Message['reactions'], emoji: string) {
   const others = (reactions ?? []).filter((r) => r.from !== 'me');
   return [...others, { emoji, from: 'me' }];
+}
+
+/** Compare two numbers by their last 10 digits (robust to E.164 vs raw DID). */
+function sameTel(a: string, b: string): boolean {
+  return a.replace(/\D/g, '').slice(-10) === b.replace(/\D/g, '').slice(-10);
 }
 
 function clientDate(ts: number): string {
