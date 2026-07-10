@@ -8,9 +8,7 @@ Type=simple
 # Path to the project. Adjust if you cloned elsewhere.
 WorkingDirectory=%h/workspace/voipms-frontend/server
 EnvironmentFile=%h/workspace/voipms-frontend/.env
-ExecStart=%h/.npm-global/bin/tsx src/index.ts
-# If tsx isn't on PATH globally, use npx instead:
-# ExecStart=/usr/bin/npx tsx src/index.ts
+ExecStart=%h/workspace/voipms-frontend/node_modules/.bin/tsx src/index.ts
 Restart=on-failure
 RestartSec=5
 
