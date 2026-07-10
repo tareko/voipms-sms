@@ -7,7 +7,8 @@ Wants=network-online.target
 Type=simple
 # Path to the project. Adjust if you cloned elsewhere.
 WorkingDirectory=%h/workspace/voipms-frontend/server
-EnvironmentFile=%h/workspace/voipms-frontend/.env
+# .env is loaded by the app via dotenv (config.ts), so no EnvironmentFile here
+# (systemd's strict parser can choke on password values).
 ExecStart=%h/workspace/voipms-frontend/node_modules/.bin/tsx src/index.ts
 Restart=on-failure
 RestartSec=5
