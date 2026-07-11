@@ -1,0 +1,13 @@
+[Unit]
+Description=voipms-sms ntfy desktop subscriber (GNOME popups)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/workspace/voipms-frontend/deploy/ntfy-subscriber.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
