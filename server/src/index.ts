@@ -36,8 +36,8 @@ async function main() {
     });
   }
 
-  app.listen(config.port, '127.0.0.1', () => {
-    console.log(`[server] http://localhost:${config.port}`);
+  app.listen(config.port, config.host, () => {
+    console.log(`[server] listening on ${config.host}:${config.port}`);
   });
 
   // Background workers

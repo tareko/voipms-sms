@@ -17,6 +17,7 @@ function warn(name: string) {
 
 export const config = {
   port: Number(process.env.PORT || 8317),
+  host: process.env.HOST || '0.0.0.0',
   webDir: resolve(projectRoot, process.env.WEB_DIR || 'web/dist'),
   dbPath: resolve(projectRoot, process.env.DB_PATH || 'data/app.db'),
   voipms: {
