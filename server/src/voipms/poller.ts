@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { getSMS, getMMS, getMediaMMS, getDIDsInfo, type NormalizedSms } from './client.js';
-import { getCachedDids, getMaxMessageId, messageExists, setDids } from '../store/db.js';
+import { getCachedDids, getMaxMessageId, messageExists, setDids, getKv, setKv } from '../store/db.js';
 import { ingest } from '../services/ingest.js';
 import { broadcast } from '../realtime/sse.js';
 import type { Did } from '../types.js';
@@ -113,6 +113,66 @@ export async function startPoller(): Promise<void> {
 
 export async function runPollOnce(): Promise<number> {
   return pollOnce();
+}
+
+const HISTORY_CHUNK_DAYS = 90; // voip.ms caps date-range queries at ~92 days
+
+export interface BackfillResult {
+  from: string;
+  to: string;
+  newMessages: number;
+  reachedLimit: boolean; // true when a chunk yields nothing (likely past account history)
+}
+
+/**
+ * Fetch one 90-day chunk of history older than the last backfill point and
+ * ingest it. Idempotent (deduped by message id). Call repeatedly to page back
+ * through history; each call surfaces older conversations and older messages.
+ */
+export async function backfillHistoryChunk(): Promise<BackfillResult> {
+  const oldestStr = getKv('history_oldest');
+  const oldest = oldestStr ? Number(oldestStr) : Date.now();
+  const fromTs = oldest - HISTORY_CHUNK_DAYS * 86400000;
+  const from = new Date(fromTs).toISOString().slice(0, 10);
+  const to = new Date(oldest).toISOString().slice(0, 10);
+  const dids = await refreshDids();
+  let n = 0;
+  for (const { did } of dids) {
+    try {
+      for (const sms of await getSMS({ did, from, to, limit: 9999 })) {
+        if (await ingest(sms, 'poll')) n++;
+      }
+    } catch (e) {
+      console.error(`[backfill] getSMS ${did}:`, (e as Error).message);
+    }
+    try {
+      for (const m of await getMMS({ did, from, to, limit: 9999 })) {
+        const key = `mms:${m.id}`;
+        if (messageExists(key)) continue;
+        let mediaUrls = m.mediaUrls;
+        if (!mediaUrls?.length) {
+          try {
+            mediaUrls = await getMediaMMS(m.id);
+          } catch {
+            /* non-fatal */
+          }
+        }
+        if (
+          await ingest(
+            { ...m, id: key, mediaUrls: mediaUrls && mediaUrls.length ? mediaUrls : undefined },
+            'poll'
+          )
+        ) {
+          n++;
+        }
+      }
+    } catch (e) {
+      console.error(`[backfill] getMMS ${did}:`, (e as Error).message);
+    }
+  }
+  setKv('history_oldest', String(fromTs));
+  console.log(`[backfill] ${from} → ${to}: ${n} new`);
+  return { from, to, newMessages: n, reachedLimit: n === 0 };
 }
 
 export function stopPoller(): void {

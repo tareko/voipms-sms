@@ -5,7 +5,7 @@ import { basename } from 'node:path';
 import { config } from '../config.js';
 import { getConversations, getThread, getMessage, getReactionsForMessage, addReaction, dedupMessages, dedupReactionEvents, registerPushEndpoint, unregisterPushEndpoint, markThreadRead, searchContacts } from '../store/db.js';
 import { sendSMS, sendMMS, setSmsCallback } from '../voipms/client.js';
-import { runPollOnce, getPollerStatus, getActiveDids } from '../voipms/poller.js';
+import { runPollOnce, backfillHistoryChunk, getPollerStatus, getActiveDids } from '../voipms/poller.js';
 import { syncContacts, getCarddavStatus } from '../contacts/carddav.js';
 import { broadcast } from '../realtime/sse.js';
 import { ingest } from '../services/ingest.js';
@@ -233,6 +233,17 @@ api.post('/contacts/refresh', async (_req, res) => {
 api.post('/poll', async (_req, res) => {
   const n = await runPollOnce();
   res.json({ ok: true, newMessages: n });
+});
+
+/** Fetch one older 90-day chunk of history from voip.ms (the "Load older" button). */
+api.post('/backfill-history', async (_req, res) => {
+  try {
+    const result = await backfillHistoryChunk();
+    broadcast({ type: 'contacts-refreshed', data: { count: 0 } });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 /** Convert existing iMessage-style reaction texts into reaction badges. */

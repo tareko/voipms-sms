@@ -43,5 +43,10 @@ export const api = {
   contacts: (q: string) => getJson<Contact[]>(`/contacts?q=${encodeURIComponent(q)}`),
   refreshContacts: () => postJson('/contacts/refresh', {}),
   poll: () => postJson('/poll', {}),
+  backfillHistory: () =>
+    postJson<{ ok: boolean; from: string; to: string; newMessages: number; reachedLimit: boolean }>(
+      '/backfill-history',
+      {}
+    ),
   applyWebhook: (did: string) => postJson('/webhook/apply', { did }),
 };

@@ -19,6 +19,7 @@ interface StoreState {
   selectContact: (contact: string) => Promise<void>;
   refreshConversations: () => Promise<void>;
   refreshMessages: () => Promise<void>;
+  backfillHistory: () => Promise<{ newMessages: number; reachedLimit: boolean }>;
   sendMessage: (text: string) => Promise<void>;
   sendMedia: (file: Blob, contentType: string, text: string, previewUrl?: string) => Promise<void>;
   retryText: (id: string, text: string) => Promise<void>;
@@ -93,6 +94,18 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ messages: merged });
     } catch (e) {
       set({ error: (e as Error).message });
+    }
+  },
+
+  backfillHistory: async () => {
+    try {
+      const r = await api.backfillHistory();
+      await get().refreshConversations();
+      await get().refreshMessages();
+      return { newMessages: r.newMessages, reachedLimit: r.reachedLimit };
+    } catch (e) {
+      set({ error: (e as Error).message });
+      return { newMessages: 0, reachedLimit: true };
     }
   },
 

@@ -9,8 +9,11 @@ export function ContactList() {
   const conversations = useStore((s) => s.conversations);
   const selectedContact = useStore((s) => s.selectedContact);
   const selectContact = useStore((s) => s.selectContact);
+  const backfillHistory = useStore((s) => s.backfillHistory);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Contact[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [exhausted, setExhausted] = useState(false);
 
   useEffect(() => {
     const q = query.trim();
@@ -45,6 +48,17 @@ export function ContactList() {
   }, [conversations, query]);
 
   const showingSearch = query.trim().length > 0;
+
+  async function loadOlder() {
+    if (loadingMore || exhausted) return;
+    setLoadingMore(true);
+    try {
+      const r = await backfillHistory();
+      if (r.reachedLimit && r.newMessages === 0) setExhausted(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <div className="contact-list">
@@ -88,6 +102,20 @@ export function ContactList() {
         )}
         {!showingSearch && conversations.length === 0 && (
           <div className="empty-hint">No conversations yet. Search a contact to start one.</div>
+        )}
+
+        {!showingSearch && (
+          <button
+            className="load-more-btn"
+            disabled={loadingMore || exhausted}
+            onClick={() => void loadOlder()}
+          >
+            {exhausted
+              ? 'No older history'
+              : loadingMore
+                ? 'Loading older…'
+                : 'Load older history'}
+          </button>
         )}
       </div>
     </div>
