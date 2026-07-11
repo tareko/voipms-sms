@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 # User-space ntfy on port 8090, file-based cache (no /var, no root).
-ExecStart=%h/.local/bin/ntfy serve --listen-http :8090 --cache-file %h/.local/share/ntfy/cache.db --base-url http://192.168.1.12:8090
+ExecStart=%h/.local/bin/ntfy serve --listen-http :8098 --cache-file %h/.local/share/ntfy/cache.db --base-url http://192.168.1.12:8098
 Restart=on-failure
 RestartSec=5
 
