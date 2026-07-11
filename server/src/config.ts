@@ -40,6 +40,14 @@ export const config = {
     key: process.env.WEBHOOK_KEY || '',
     publicUrl: process.env.PUBLIC_WEBHOOK_URL || '',
   },
+  ntfy: {
+    url: (process.env.NTFY_URL || '').replace(/\/+$/, ''), // e.g. http://192.168.1.12:8090
+    topic: process.env.NTFY_TOPIC || '', // shared desktop topic
+    token: process.env.NTFY_TOKEN || '', // publish token (optional)
+  },
+  auth: {
+    token: process.env.APP_API_TOKEN || '', // optional bearer token; if unset, open (rely on VPN)
+  },
 };
 
 export function checkConfig() {

@@ -1,18 +1,6 @@
-import {
-  insertMessage,
-  getContactName,
-  markThreadRead,
-  messageExists,
-  isDuplicateMessage,
-  isDuplicateReaction,
-  getMessage,
-  getReactionsForMessage,
-  getThread,
-  reactionExists,
-  addReaction,
-} from '../store/db.js';
+import { insertMessage, getContactName, markThreadRead, messageExists, isDuplicateMessage, isDuplicateReaction, getMessage, getReactionsForMessage, getThread, reactionExists, addReaction } from '../store/db.js';
 import { broadcast } from '../realtime/sse.js';
-import { notifyNewMessage } from '../notify/native.js';
+import { notifyMessage } from '../notify/notify.js';
 import { normalizeTel } from '../contacts/match.js';
 import { downloadAndCacheMedia } from './media.js';
 import { detectReaction, matchTarget } from '../reactions.js';
@@ -80,7 +68,7 @@ function handleReaction(sms: NormalizedSms): boolean {
     broadcastUpdated(target.id);
     if (sms.type === 1) {
       const name = getContactName(contact) ?? sms.contactRaw;
-      notifyNewMessage({ name, text: `reacted ${detected.emoji}` });
+      void notifyMessage({ name, did, contact, preview: `reacted ${detected.emoji}`, id: sms.id });
     }
     return true; // suppress the "Liked …" text bubble
   }
@@ -114,7 +102,13 @@ export async function ingest(
     broadcast({ type: 'message', data: { ...msg } });
     if (msg.type === 1) {
       const name = getContactName(msg.contact) ?? msg.contactRaw;
-      notifyNewMessage({ name, text: msg.message || (msg.media?.length ? '📷 Photo' : '') });
+      void notifyMessage({
+        name,
+        did: msg.did,
+        contact: msg.contact,
+        preview: msg.message || (msg.media?.length ? '📷 Photo' : ''),
+        id: msg.id,
+      });
     }
   }
   return inserted;

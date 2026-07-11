@@ -3,7 +3,7 @@ import multer from 'multer';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { config } from '../config.js';
-import { getConversations, getThread, getMessage, getReactionsForMessage, addReaction, dedupMessages, dedupReactionEvents, markThreadRead, searchContacts } from '../store/db.js';
+import { getConversations, getThread, getMessage, getReactionsForMessage, addReaction, dedupMessages, dedupReactionEvents, registerPushEndpoint, unregisterPushEndpoint, markThreadRead, searchContacts } from '../store/db.js';
 import { sendSMS, sendMMS, setSmsCallback } from '../voipms/client.js';
 import { runPollOnce, getPollerStatus, getActiveDids } from '../voipms/poller.js';
 import { syncContacts, getCarddavStatus } from '../contacts/carddav.js';
@@ -20,6 +20,15 @@ export const api = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 }, // headroom; client resizes before upload
+});
+
+// Optional bearer-token auth. If APP_API_TOKEN is unset (default), the backend
+// is open and relies on the VPN for access control.
+api.use((req, res, next) => {
+  if (!config.auth.token) return next();
+  const got = req.headers.authorization || '';
+  if (got === `Bearer ${config.auth.token}`) return next();
+  return res.status(401).json({ error: 'unauthorized' });
 });
 
 function nowVoipDate(): string {
@@ -237,6 +246,20 @@ api.post('/dedup', (_req, res) => {
   const messages = dedupMessages();
   const reactions = dedupReactionEvents();
   res.json({ ok: true, removedMessages: messages, removedReactions: reactions });
+});
+
+/** Register a UnifiedPush/ntfy endpoint for push (the Android app). */
+api.post('/push/register', (req, res) => {
+  const { endpoint } = req.body as { endpoint?: string };
+  if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+  registerPushEndpoint(endpoint);
+  res.json({ ok: true });
+});
+
+api.post('/push/unregister', (req, res) => {
+  const { endpoint } = req.body as { endpoint?: string };
+  if (endpoint) unregisterPushEndpoint(endpoint);
+  res.json({ ok: true });
 });
 
 /** Apply the voip.ms SMS URL callback to a DID (Milestone 2 helper). */

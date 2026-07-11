@@ -56,6 +56,11 @@ export function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_react_thread ON reaction_events(did, contact);
     CREATE INDEX IF NOT EXISTS idx_react_target ON reaction_events(target_id);
+
+    CREATE TABLE IF NOT EXISTS push_endpoints (
+      endpoint TEXT PRIMARY KEY,    -- UnifiedPush/ntfy endpoint URL (per device)
+      created  INTEGER NOT NULL
+    );
   `);
 
   // Additive migration: add `media` column for MMS attachments (existing DBs).
@@ -226,6 +231,22 @@ export function isDuplicateReaction(did: string, contact: string, emoji: string,
       .prepare('SELECT 1 FROM reaction_events WHERE did = ? AND contact = ? AND emoji = ? AND ts = ? LIMIT 1')
       .get(did, contact, emoji, ts)
   );
+}
+
+// ---------- push endpoints ----------
+export function registerPushEndpoint(endpoint: string): void {
+  getDb()
+    .prepare('INSERT INTO push_endpoints(endpoint, created) VALUES(?, ?) ON CONFLICT(endpoint) DO NOTHING')
+    .run(endpoint, Date.now());
+}
+
+export function unregisterPushEndpoint(endpoint: string): void {
+  getDb().prepare('DELETE FROM push_endpoints WHERE endpoint = ?').run(endpoint);
+}
+
+export function getPushEndpoints(): string[] {
+  const rows = getDb().prepare('SELECT endpoint FROM push_endpoints').all() as { endpoint: string }[];
+  return rows.map((r) => r.endpoint);
 }
 
 /** Remove duplicate reaction events (keeps the first of each group). */
