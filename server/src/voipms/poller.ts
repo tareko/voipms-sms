@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { getSMS, getMMS, getMediaMMS, getDIDsInfo, type NormalizedSms } from './client.js';
 import { getCachedDids, getMaxMessageId, messageExists, setDids, getKv, setKv } from '../store/db.js';
 import { ingest } from '../services/ingest.js';
+import { backfillReactions } from '../services/backfill.js';
 import { broadcast } from '../realtime/sse.js';
 import type { Did } from '../types.js';
 
@@ -172,6 +173,8 @@ export async function backfillHistoryChunk(): Promise<BackfillResult> {
   }
   setKv('history_oldest', String(fromTs));
   console.log(`[backfill] ${from} → ${to}: ${n} new`);
+  // A reaction may be ingested before its target within/across chunks; heal now.
+  backfillReactions();
   return { from, to, newMessages: n, reachedLimit: n === 0 };
 }
 
