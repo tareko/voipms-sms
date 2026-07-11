@@ -12,6 +12,8 @@ import { ingest } from '../services/ingest.js';
 import { saveUploadedMedia, getMediaPath, mediaContentType } from '../services/media.js';
 import { buildReactionText } from '../reactions.js';
 import { backfillReactions } from '../services/backfill.js';
+import { parseVoipDate } from '../voipms/client.js';
+import { getDb } from '../store/db.js';
 import type { NormalizedSms } from '../voipms/client.js';
 import { normalizeTel } from '../contacts/match.js';
 
@@ -32,9 +34,17 @@ api.use((req, res, next) => {
 });
 
 function nowVoipDate(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  // Format current time in the voip.ms account tz, to match voip.ms's date
+  // convention (so the `date` column is consistent for sent and received).
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: config.voipms.timezone,
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date());
+  const m: Record<string, string> = {};
+  for (const x of p) m[x.type] = x.value;
+  return `${m.year}-${m.month}-${m.day} ${m.hour}:${m.minute}:${m.second}`;
 }
 
 /** voip.ms sendSMS expects 10-digit NANP numbers (no leading country code). */
@@ -257,6 +267,29 @@ api.post('/dedup', (_req, res) => {
   const messages = dedupMessages();
   const reactions = dedupReactionEvents();
   res.json({ ok: true, removedMessages: messages, removedReactions: reactions });
+});
+
+/**
+ * Recompute message timestamps from the stored voip.ms `date` string using the
+ * configured account timezone. Existing rows were parsed as server-local (UTC),
+ * which skewed non-UTC accounts. App-sent rows (source='send') already have a
+ * correct Date.now() ts and are left untouched.
+ */
+api.post('/fix-timestamps', (_req, res) => {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT id, date FROM messages WHERE source <> 'send'")
+    .all() as { id: string; date: string }[];
+  const upd = db.prepare('UPDATE messages SET ts = ? WHERE id = ?');
+  let n = 0;
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      upd.run(parseVoipDate(r.date), r.id);
+      n++;
+    }
+  });
+  tx();
+  res.json({ ok: true, updatedMessages: n, timezone: config.voipms.timezone });
 });
 
 /** Register a UnifiedPush/ntfy endpoint for push (the Android app). */

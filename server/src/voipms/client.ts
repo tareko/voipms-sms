@@ -77,11 +77,41 @@ function decodeMessage(raw: string): string {
   }
 }
 
+/**
+ * Convert a naive 'YYYY-MM-DD HH:MM:SS' (expressed in the given IANA timezone)
+ * to a UTC epoch in ms, DST-correct. Falls back to server-local parsing if the
+ * timezone is invalid.
+ */
+function epochFromTimezoneParts(
+  Y: number, Mo: number, D: number, h: number, mi: number, s: number,
+  tz: string
+): number {
+  const candidate = Date.UTC(Y, Mo - 1, D, h, mi, s); // instant if the naive time were UTC
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(candidate));
+    const m: Record<string, string> = {};
+    for (const p of parts) m[p.type] = p.value;
+    const wallAsUtc = Date.UTC(+m.year, +m.month - 1, +m.day, (+m.hour) % 24, +m.minute, +m.second);
+    const offsetMs = wallAsUtc - candidate; // tz offset at that instant
+    return candidate - offsetMs;
+  } catch {
+    return candidate; // invalid tz -> treat as UTC
+  }
+}
+
 export function parseVoipDate(date: string): number {
-  // 'YYYY-MM-DD HH:MM:SS' -> epoch ms (treated as local)
-  const iso = date.replace(' ', 'T');
-  const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? t : Date.now();
+  // voip.ms returns 'YYYY-MM-DD HH:MM:SS' in the account timezone (not UTC).
+  if (!date) return Date.now();
+  const [d, t] = date.split(' ');
+  const [Y, Mo, D] = (d || '').split('-').map(Number);
+  const [h, mi, s] = (t || '0:0:0').split(':').map(Number);
+  if (!Y || !Mo || !D) return Date.now();
+  return epochFromTimezoneParts(Y, Mo, D, h || 0, mi || 0, s || 0, config.voipms.timezone);
 }
 
 function normalize(row: SmsRow): NormalizedSms {

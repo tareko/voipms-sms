@@ -24,6 +24,7 @@ export const config = {
     username: process.env.VOIPMS_API_USERNAME || '',
     password: process.env.VOIPMS_API_PASSWORD || '',
     defaultCountry: (process.env.VOIPMS_DEFAULT_COUNTRY || 'US').toUpperCase(),
+    timezone: process.env.VOIPMS_TIMEZONE || 'America/Toronto',
     dids: (process.env.VOIPMS_DIDS || '')
       .split(',')
       .map((s) => s.trim())
