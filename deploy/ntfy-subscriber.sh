@@ -30,7 +30,6 @@ exec "$NTFY" subscribe "${AUTH[@]}" "$NTFY_URL/$NTFY_TOPIC" | while IFS= read -r
   notify-send \
     --app-name="Voip.ms text" \
     --icon=voipms-sms \
-    --hint=string:desktop-entry:voipms-sms \
     --urgency=normal \
     "$title" "$msg" 2>/dev/null || true
 done
