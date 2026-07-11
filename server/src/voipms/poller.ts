@@ -141,7 +141,7 @@ export async function backfillHistoryChunk(): Promise<BackfillResult> {
   for (const { did } of dids) {
     try {
       for (const sms of await getSMS({ did, from, to, limit: 9999 })) {
-        if (await ingest(sms, 'poll')) n++;
+        if (await ingest(sms, 'poll', undefined, false)) n++;
       }
     } catch (e) {
       console.error(`[backfill] getSMS ${did}:`, (e as Error).message);
@@ -161,7 +161,9 @@ export async function backfillHistoryChunk(): Promise<BackfillResult> {
         if (
           await ingest(
             { ...m, id: key, mediaUrls: mediaUrls && mediaUrls.length ? mediaUrls : undefined },
-            'poll'
+            'poll',
+            undefined,
+            false
           )
         ) {
           n++;

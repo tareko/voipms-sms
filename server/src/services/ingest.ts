@@ -39,7 +39,7 @@ function broadcastUpdated(targetId: string): void {
  * otherwise falls through so the raw text is still shown.
  * Returns true if the message was consumed as a reaction (do not store as text).
  */
-function handleReaction(sms: NormalizedSms): boolean {
+function handleReaction(sms: NormalizedSms, notify: boolean): boolean {
   const detected = detectReaction(sms.message);
   if (!detected) return false;
   if (reactionExists(sms.id)) return true; // already processed
@@ -66,7 +66,7 @@ function handleReaction(sms: NormalizedSms): boolean {
 
   if (target) {
     broadcastUpdated(target.id);
-    if (sms.type === 1) {
+    if (notify && sms.type === 1) {
       const name = getContactName(contact) ?? sms.contactRaw;
       void notifyMessage({ name, did, contact, preview: `reacted ${detected.emoji}`, id: sms.id });
     }
@@ -79,14 +79,18 @@ function handleReaction(sms: NormalizedSms): boolean {
  * Ingest a voip.ms message. Reactions are detected and attached as badges.
  * For MMS, downloads + caches media (unless already stored, or prebuilt media
  * is supplied — e.g. a sent MMS). Inserts, broadcasts via SSE, and fires a
- * native notification (if received & new).
+ * push notification (if received, new, and `notify` is true).
+ *
+ * Pass `notify: false` when backfilling history (you don't want a popup for
+ * every old message); the real-time poller and webhook use the default true.
  */
 export async function ingest(
   sms: NormalizedSms,
   source: 'poll' | 'webhook' | 'send',
-  prebuiltMedia?: MediaRef[]
+  prebuiltMedia?: MediaRef[],
+  notify: boolean = true
 ): Promise<boolean> {
-  if (handleReaction(sms)) return true;
+  if (handleReaction(sms, notify)) return true;
 
   let media = prebuiltMedia;
   if (!media && sms.mediaUrls && sms.mediaUrls.length && !messageExists(sms.id)) {
@@ -100,7 +104,7 @@ export async function ingest(
   const inserted = insertMessage(msg, source);
   if (inserted) {
     broadcast({ type: 'message', data: { ...msg } });
-    if (msg.type === 1) {
+    if (notify && msg.type === 1) {
       const name = getContactName(msg.contact) ?? msg.contactRaw;
       void notifyMessage({
         name,
