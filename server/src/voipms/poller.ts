@@ -93,6 +93,8 @@ async function pollOnce(): Promise<number> {
       }
     }
     status = `ok (${new String(newCount)} new @ ${new Date().toLocaleTimeString()})`;
+    // A reaction may be ingested before its target within a batch; heal.
+    if (newCount > 0) backfillReactions();
   } catch (err) {
     status = `error: ${(err as Error).message}`;
     console.error('[poller] error:', (err as Error).message);

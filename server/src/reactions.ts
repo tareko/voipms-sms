@@ -123,8 +123,10 @@ function norm(s: string): string {
 
 /**
  * Find the best message to attach a reaction to, given the quoted text.
- * Scores by exact > prefix > substring; most recent wins ties. iOS truncates
- * long messages, so prefix/substring matches are essential.
+ * Scores by exact > prefix > substring (tiers far apart so a long substring
+ * can never beat an exact match). Most recent wins ties. iOS truncates long
+ * messages, so prefix/substring matches are essential. Reaction texts
+ * themselves are skipped (a reaction is never a target).
  */
 export function matchTarget(messages: Message[], quoted: string): Message | null {
   const q = norm(quoted);
@@ -132,12 +134,13 @@ export function matchTarget(messages: Message[], quoted: string): Message | null
   let best: { msg: Message; score: number } | null = null;
   // messages are oldest-first; iterate so later (more recent) entries win ties.
   for (const msg of messages) {
+    if (detectReaction(msg.message)) continue; // a reaction text isn't a valid target
     const m = norm(msg.message);
     if (!m) continue;
     let score = 0;
-    if (m === q) score = 100;
-    else if (m.startsWith(q) || q.startsWith(m)) score = 60 + Math.min(m.length, q.length);
-    else if (m.includes(q) || q.includes(m)) score = 30 + Math.min(m.length, q.length);
+    if (m === q) score = 100000;
+    else if (m.startsWith(q) || q.startsWith(m)) score = 1000 + Math.min(m.length, q.length);
+    else if (m.includes(q) || q.includes(m)) score = 100 + Math.min(m.length, q.length);
     if (score > 0 && (!best || score >= best.score)) best = { msg, score };
   }
   return best?.msg ?? null;
