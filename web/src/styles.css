@@ -131,12 +131,12 @@ body {
 .load-more-btn:disabled { color: var(--text-muted); cursor: default; opacity: 0.7; }
 
 .status-bar {
-  display: flex; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
   padding: 6px 12px; font-size: 11px; color: var(--text-muted);
   background: var(--panel-2); border-top: 1px solid var(--border);
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.status-bar span { overflow: hidden; text-overflow: ellipsis; }
+.status-bar span { flex-shrink: 0; }
 
 /* ---------- Main / thread ---------- */
 .main { display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
