@@ -131,6 +131,18 @@ function norm(s: string): string {
 export function matchTarget(messages: Message[], quoted: string): Message | null {
   const q = norm(quoted);
   if (!q) return null;
+
+  // Image/media reactions ("Loved an image") — match the most recent message
+  // that has media, since there's no text to compare.
+  if (/^(an?\s+(image|photo|picture|attachment|video|gif|sticker|audio))$/i.test(q)) {
+    let mediaMsg: Message | null = null;
+    for (const msg of messages) {
+      if (detectReaction(msg.message)) continue;
+      if (msg.media && msg.media.length > 0) mediaMsg = msg; // keep last (most recent)
+    }
+    return mediaMsg;
+  }
+
   let best: { msg: Message; score: number } | null = null;
   // messages are oldest-first; iterate so later (more recent) entries win ties.
   for (const msg of messages) {
