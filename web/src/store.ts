@@ -2,10 +2,9 @@ import { create } from 'zustand';
 import { api } from './api';
 import type { AppStatus, Conversation, Did, Message } from './types';
 
-let pollStarted = false;
-
 interface StoreState {
   status: AppStatus | null;
+  sseStatus: 'connecting' | 'connected';
   dids: Did[];
   selectedDid: string | null;
 
@@ -36,6 +35,7 @@ interface StoreState {
 
 export const useStore = create<StoreState>((set, get) => ({
   status: null,
+  sseStatus: 'connecting',
   dids: [],
   selectedDid: null,
   conversations: [],
@@ -54,16 +54,6 @@ export const useStore = create<StoreState>((set, get) => ({
       if (selectedDid) await get().refreshConversations();
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
-    }
-    // Safety net: refresh every 30s in case SSE misses an event (backend
-    // restart, tab throttling, dropped EventSource). The poller runs every 20s,
-    // so this catches up within one cycle.
-    if (!pollStarted) {
-      pollStarted = true;
-      setInterval(() => {
-        void get().refreshConversations();
-        if (get().selectedContact) void get().refreshMessages();
-      }, 30000);
     }
   },
 

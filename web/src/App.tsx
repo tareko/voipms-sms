@@ -11,6 +11,7 @@ export function App() {
   useSSE();
   const init = useStore((s) => s.init);
   const status = useStore((s) => s.status);
+  const sseStatus = useStore((s) => s.sseStatus);
   const loading = useStore((s) => s.loading);
   const error = useStore((s) => s.error);
 
@@ -23,6 +24,10 @@ export function App() {
       <aside className="sidebar">
         <header className="sidebar-header">
           <DidSwitcher />
+          <span
+            className={`sse-dot ${sseStatus}`}
+            title={sseStatus === 'connected' ? 'Live (SSE connected)' : 'Reconnecting…'}
+          />
         </header>
         <ContactList />
         <StatusBar status={status} />
