@@ -24,13 +24,9 @@ export function App() {
       <aside className="sidebar">
         <header className="sidebar-header">
           <DidSwitcher />
-          <span
-            className={`sse-dot ${sseStatus}`}
-            title={sseStatus === 'connected' ? 'Live (SSE connected)' : 'Reconnecting…'}
-          />
         </header>
         <ContactList />
-        <StatusBar status={status} />
+        <StatusBar status={status} sseStatus={sseStatus} />
       </aside>
 
       <main className="main">
@@ -43,10 +39,20 @@ export function App() {
   );
 }
 
-function StatusBar({ status }: { status: ReturnType<typeof useStore.getState>['status'] }) {
+function StatusBar({
+  status,
+  sseStatus,
+}: {
+  status: ReturnType<typeof useStore.getState>['status'];
+  sseStatus: 'connecting' | 'connected';
+}) {
   if (!status) return null;
   return (
     <footer className="status-bar" title="Background worker status">
+      <span>
+        <span className={`sse-dot ${sseStatus}`} />
+        {sseStatus === 'connected' ? 'Live' : 'Reconnecting'}
+      </span>
       <span>📡 {status.poller}</span>
       <span>👤 {status.carddav}</span>
     </footer>
