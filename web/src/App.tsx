@@ -48,13 +48,13 @@ function StatusBar({
 }) {
   if (!status) return null;
   return (
-    <footer className="status-bar" title="Background worker status">
+    <footer className="status-bar">
       <span>
         <span className={`sse-dot ${sseStatus}`} />
         {sseStatus === 'connected' ? 'Live' : 'Reconnecting'}
       </span>
-      <span>📡 {status.poller}</span>
-      <span>👤 {status.carddav}</span>
+      <span title={`Poller: ${status.poller}`}>📡</span>
+      <span title={`Contacts: ${status.carddav}`}>👤</span>
     </footer>
   );
 }
