@@ -97,8 +97,11 @@ export function Composer() {
   function recomputeToken(value: string) {
     const ta = taRef.current;
     const caret = ta?.selectionStart ?? value.length;
-    setToken(tokenAt(value, caret));
-    setSelIdx(0);
+    const newToken = tokenAt(value, caret);
+    // Only reset the suggestion index when the query actually changes, so
+    // arrow-key navigation isn't wiped out.
+    if (newToken?.query !== token?.query) setSelIdx(0);
+    setToken(newToken);
   }
 
   function replaceRange(start: number, end: number, insert: string) {
@@ -281,7 +284,10 @@ export function Composer() {
             setText(e.target.value);
             recomputeToken(e.target.value);
           }}
-          onKeyUp={() => recomputeToken(text)}
+          onKeyUp={(e) => {
+            if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key)) return;
+            recomputeToken(text);
+          }}
           onClick={() => recomputeToken(text)}
           onBlur={() => setTimeout(() => setToken(null), 150)}
           onKeyDown={onKeyDown}
