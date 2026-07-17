@@ -73,7 +73,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!did) return;
     try {
       const conversations = await api.conversations(did);
-      set({ conversations });
+      set({ conversations, error: null });
     } catch (e) {
       set({ error: (e as Error).message });
     }

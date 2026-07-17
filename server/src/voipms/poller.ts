@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { getSMS, getMMS, getMediaMMS, getDIDsInfo, type NormalizedSms } from './client.js';
-import { getCachedDids, getMaxMessageId, messageExists, setDids, getKv, setKv } from '../store/db.js';
+import { getCachedDids, getMaxMessageId, messageExists, reactionExists, setDids, getKv, setKv } from '../store/db.js';
 import { ingest } from '../services/ingest.js';
 import { backfillReactions } from '../services/backfill.js';
 import { broadcast } from '../realtime/sse.js';
@@ -47,8 +47,13 @@ async function pollOnce(): Promise<number> {
   let newCount = 0;
   try {
     const dids = await refreshDids();
-    const sinceId = getMaxMessageId();
+    // Track the highest SMS id we've SEEN (not just ingested) so suppressed
+    // reactions (not stored in the messages table) still advance the cursor.
+    // Without this, the same reaction is re-processed every cycle.
+    const storedSince = getKv('poller_since_id');
+    const sinceId = storedSince ? BigInt(storedSince) : getMaxMessageId();
     const from = dateNDaysAgo(7);
+    let maxSmsId = sinceId;
 
     for (const { did } of dids) {
       let messages: NormalizedSms[];
@@ -60,7 +65,9 @@ async function pollOnce(): Promise<number> {
         continue;
       }
       for (const sms of messages) {
-        if (sinceId > 0n && BigInt(sms.id || '0') <= sinceId) continue;
+        const id = BigInt(sms.id || '0');
+        if (id > maxSmsId) maxSmsId = id;
+        if (sinceId > 0n && id <= sinceId) continue;
         if (await ingest(sms, 'poll')) newCount++;
       }
 
@@ -74,7 +81,8 @@ async function pollOnce(): Promise<number> {
       }
       for (const m of mms) {
         const key = `mms:${m.id}`;
-        if (messageExists(key)) continue;
+        // Skip if already stored as a message OR processed as a reaction.
+        if (messageExists(key) || reactionExists(key)) continue;
         // getMMS omits media inline even for image MMS — fetch via getMediaMMS.
         let mediaUrls = m.mediaUrls;
         if (!mediaUrls || !mediaUrls.length) {
@@ -92,6 +100,8 @@ async function pollOnce(): Promise<number> {
         if (await ingest(namespaced, 'poll')) newCount++;
       }
     }
+    // Persist the highest id seen so suppressed reactions don't loop forever.
+    setKv('poller_since_id', maxSmsId.toString());
     status = `ok (${new String(newCount)} new @ ${new Date().toLocaleTimeString()})`;
     // A reaction may be ingested before its target within a batch; heal.
     if (newCount > 0) backfillReactions();
