@@ -64,8 +64,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   selectContact: async (contact: string) => {
     set({ selectedContact: contact });
-    await get().refreshMessages();
     await get().markRead(contact);
+    await get().refreshMessages();
   },
 
   refreshConversations: async () => {
@@ -115,6 +115,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const { selectedDid, selectedContact, messages, conversations } = get();
     const body = text.trim();
     if (!selectedDid || !selectedContact || !body) return;
+    void get().markRead(selectedContact); // replying = actively reading
     const now = Date.now();
     const optId = `opt-${now}-${Math.random().toString(36).slice(2, 6)}`;
     const contactRaw =
@@ -148,6 +149,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const { selectedDid, selectedContact, messages, conversations } = get();
     const body = text.trim();
     if (!selectedDid || !selectedContact) return;
+    void get().markRead(selectedContact); // replying = actively reading
     const now = Date.now();
     const optId = `opt-mms-${now}-${Math.random().toString(36).slice(2, 6)}`;
     const contactRaw =
@@ -229,6 +231,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
     try {
       await api.markRead(did, contact);
+      // Re-fetch to confirm — overrides any stale refresh that raced with us.
+      await get().refreshConversations();
     } catch {
       /* non-fatal */
     }
